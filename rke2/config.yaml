@@ -1,0 +1,21 @@
+# The advertised API endpoint (IP on qvm0, or a DNS name pointing there)
+
+# Needs to be set on nodes that want to join
+# Shall be replaced with a VIP and fixed domain
+server: https://rcp0.qvm0.lan:9345
+
+# Needs to be set for the first node
+tls-san:
+ - rcp0.qvm0.lan
+
+# Either set from the start, or retrieve from first node
+token: abcdefgh
+
+cluster-cidr: "10.44.0.0/16"
+service-cidr: "10.45.0.0/16"
+disable:
+  - rke2-ingress-nginx
+  - rke2-metrics-server
+  - rke2-snapshot-controller
+  - rke2-snapshot-controller-crd
+  - rke2-snapshot-validation-webhook
