@@ -106,9 +106,6 @@ if ((detach)); then
   args+=(
     -daemonize
     -display none
-    -vga none
-    -serial none
-    # PCI bus to plug the vconsole into
     -device virtio-serial-pci
     -chardev "pty,mux=on,id=char0"
     -mon "chardev=char0,mode=readline"
