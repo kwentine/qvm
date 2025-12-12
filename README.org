@@ -14,6 +14,8 @@ To bring up the appartus:
   All virtual machines will plug into that bridge.
 #+begin_src sh :tangle setup.sh
   qvm-bridge up
+  # Inspect
+  ip addr show qvm0
 #+end_src
 
 - Setup host firewall rules that make the internet reachable from the bridge.
@@ -21,6 +23,9 @@ To bring up the appartus:
 #+begin_src sh :tangle setup.sh
   qvm-setup-host
   qvm-dns up
+  # Inspect
+  resolvectl status qvm0
+  journalctl -b SYSLOG_IDENTIFIER=dnsmasq
 #+end_src
 
 - Start virtual machines.
