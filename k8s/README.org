@@ -1,0 +1,63 @@
+#+TITLE: Kubernetes, the vanilla way
+
+Document experiments performed on a cluster stetup following [[https://github.com/kelseyhightower/kubernetes-the-hard-way][Kubernetes the Hard Way]].
+
+* In
+
+- Uninstall =cockpit= and =insights-client= since they are not needed and output annoying =/etc/motd.d=
+#+begin_src sh
+  for host in cp wk1 wk2; do
+    ssh -T root@"${host}" dnf -y remove cockpit-ws-334.1-1.el10_0.x86_64 insights-client
+  done
+#+end_src
+
+- Verify that I can connect to the API server from my host.
+  The CA  used to authenticate the certificate presented by the server is embedded in the varioud =.kubeconfig= files
+#+begin_src sh
+  openssl s_client -showcerts -connect cp.qvm0.lan:6443 -verifyCAfile /var/vms/certs/k8s/ca.crt  </dev/null
+    | openssl x509 -noout -text
+#+end_src
+
+- Examine the TLS identity that the =admin= user presents to the API server:
+#+begin_example
+$ yq '.users[0].user.client-certificate-data' admin.kubeconfig | base64 -d | openssl x509 -noout -subject
+subject=CN=admin, O=system:masters
+#+end_example
+
+* User credentials and RBAC
+** Client certificate
+Client certificates must be issues by the CA trusted by the API server.
+#+begin_example
+kube-apiserver --client-ca-file=/var/lib/kubernetes/ca.crt
+#+end_example
+
+I keep this CA cert and key in =$QVM_DIR/certs/k8s/ca.{key,crt}=
+
+Create a certificate for user =kwentine=, and verify that it can be used to authenticate:
+#+begin_example
+$ ./create_user_cert.sh kwentine
+$ curl --cert kwentine.crt --key kwentine.key \
+     --cacert /var/vms/certs/k8s/ca.crt \
+     --json {"apiVersion": "authentication.k8s.io/v1","kind": "SelfSubjectReview"} \
+     https://cp.qvm0.lan:6443/apis/authentication.k8s.io/v1/selfsubjectreviews
+#+end_example
+
+Output snippet:
+#+begin_src yaml
+status:
+userInfo:
+  username: kwentine
+  groups:
+    - kwentine
+    - system:authenticated
+#+end_src
+
+RBAC =ClusterRole= and =ClusterRoleBinding= allowing user =kwentine= to view pods are in [[file:rbac/]].
+Verify that =kwentine= can indeed view pods:
+#+begin_example
+./kurl.sh pods
+#+end_example
+
+** Service account token
+
+* Querying the API server with HTTP
