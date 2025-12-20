@@ -1,8 +1,8 @@
 export KUBECONFIG=/etc/rancher/rke2/rke2.yaml
 export PATH=/var/lib/rancher/rke2/bin:/var/lib/rancher/rke2/bin:/root/.local/bin:/root/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+export CRI_CONFIG_FILE=/var/lib/rancher/rke2/agent/etc/crictl.yaml
 # shellcheck disable=SC1090
 source <(kubectl completion bash)
-export CRI_CONFIG_FILE=/var/lib/rancher/rke2/agent/etc/crictl.yaml
 
 etcdctl() {
   local etcd_id

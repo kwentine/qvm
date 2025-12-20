@@ -26,12 +26,13 @@ subject=CN=admin, O=system:masters
 
 * User credentials and RBAC
 ** Client certificate
-Client certificates must be issues by the CA trusted by the API server.
+Certificates used for client authentication must be issued by CA the API server trusts.
+This is the =--client-ca-file= flag:
 #+begin_example
-kube-apiserver --client-ca-file=/var/lib/kubernetes/ca.crt
+kube-apiserver --client-ca-file=/var/lib/kubernetes/ca.crt #...
 #+end_example
 
-I keep this CA cert and key in =$QVM_DIR/certs/k8s/ca.{key,crt}=
+I keep this CA certificate and corresponding key in =$QVM_DIR/certs/k8s/ca.{key,crt}=
 
 Create a certificate for user =kwentine=, and verify that it can be used to authenticate:
 #+begin_example
@@ -60,4 +61,6 @@ Verify that =kwentine= can indeed view pods:
 
 ** Service account token
 
-* Querying the API server with HTTP
+* Kubernetes HTTP API
+The script =kurl.sh= explores the HTTP API exposed by the API server.
+I am curious to understand how =kubectl= concepts map to the HTTP protocol.
