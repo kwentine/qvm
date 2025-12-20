@@ -64,3 +64,38 @@ Verify that =kwentine= can indeed view pods:
 * Kubernetes HTTP API
 The script =kurl.sh= explores the HTTP API exposed by the API server.
 I am curious to understand how =kubectl= concepts map to the HTTP protocol.
+* DNS
+- I installed the CoreDNS Helm chart with default values, in the coredns =namespace=
+- Initially, the Core DNS pod could not contact the API server
+#+begin_example
+[ERROR] plugin/kubernetes: Failed to watch
+#+end_example
+- The =kubernetes= service cluster IP was not included in the API server's certificate IPs.
+  - I looked at the TLS config from "Kubernetes the hard way", and adjusted =--service-cluster-ip-range= accordingly.
+    See: https://github.com/kelseyhightower/kubernetes-the-hard-way/issues/905
+- Configure =kubelet=
+  - =clusterDomain= should match the CoreDNS zone, =cluster.local= by default.
+  - =clusterDNS= should match the =coredns= service =ClusterIP=
+
+A good way to troubleshoot initial TLS error, since the CoreDNS logs are very terse:
+#+begin_src sh
+  kubectl run -n coredns debug-dns \
+    --image=curlimages/curl:latest \
+    --restart=Never \
+    --command -- sleep 3600
+
+  kubectl exec -n coredns debug-dns -- /bin/sh -c '
+    CACERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+    curl -v --cacert $CACERT -H "Authorization: Bearer $TOKEN" https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT_HTTPS}/api/v1/endpoints
+  '
+#+end_src
+See: [[https://kubernetes.io/docs/tasks/run-application/access-api-from-pod/][Accessing API server from pods]]
+
+Another technique to check that the service account permissions are in order:
+#+begin_example
+$ kubectl --as system:serviceaccount:coredns:default auth can-i watch endpoints
+yes
+#+end_example
+
+I took a long time to narrow down the issue and fix it, but it was instructive!
