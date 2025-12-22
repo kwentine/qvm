@@ -4,5 +4,3 @@
 .env
 values.auto.pkrvars.hcl
 *.fd
-*.kubeconfig
-*.key
