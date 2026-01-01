@@ -8,6 +8,6 @@ roleRef:
   kind: ClusterRole
   name: qvm:kwentine
 subjects:
-- apiGroup: rbac.authorization.k8s.io
-  kind: User
-  name: kwentine
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: kwentine

@@ -1,10 +1,10 @@
+---
 #cloud-config
 # SSH
 disable_root: False
 ssh_pwauth: True
 ssh_authorized_keys:
   - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFWxleK9RNC9lxZotL95FttjZkgwrlc5TUawbDsyZRx4 kwentine@localhost"
-
 chpasswd:
   expire: False
   users:
@@ -14,7 +14,6 @@ chpasswd:
     - name: cloud-user
       password: nuage
       type: text
-
 # Users
 users:
   - default
@@ -22,11 +21,9 @@ users:
     lock_passwd: False
     ssh_authorized_keys: ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFWxleK9RNC9lxZotL95FttjZkgwrlc5TUawbDsyZRx4 kwentine@localhost"]
     shell: /bin/bash
-
 # Package configuration
 mounts:
-  - [ /dev/cdrom, /mnt/dvd, "iso9660", "ro,defaults,nofail", "0", "0" ]
-
+  - [/dev/cdrom, /mnt/dvd, "iso9660", "ro,defaults,nofail", "0", "0"]
 write_files:
   - path: /etc/vconsole.conf
     content: |
