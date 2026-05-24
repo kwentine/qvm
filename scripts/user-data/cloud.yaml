@@ -1,5 +1,7 @@
 ---
 #cloud-config
+# Hostname
+host: ${QVM_HOST}
 # SSH
 disable_root: False
 ssh_pwauth: True
