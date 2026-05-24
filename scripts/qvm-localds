@@ -1,5 +1,4 @@
-#!/bin/bash
-# shellcheck disable=SC2119
+#!/usr/bin/env bash
 #+ Build cloud-init local datasource for HOST
 #+ Usage: SCRIPT [-h] [-u USER_DATA] HOST [HOST...]
 set -eu
@@ -19,7 +18,7 @@ while getopts hu: opt; do
       user_data="${OPTARG}"
       ;;
     *)
-      usage
+      usage "${opt}"
       ;;
   esac
 done
