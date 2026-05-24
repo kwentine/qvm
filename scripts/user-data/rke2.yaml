@@ -1,24 +1,11 @@
----
 #cloud-config
 hostname: ${QVM_HOST}
 disable_root: False
-ssh_pwauth: True
 ssh_authorized_keys:
   - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFWxleK9RNC9lxZotL95FttjZkgwrlc5TUawbDsyZRx4 kwentine@localhost"
-chpasswd:
-  expire: False
-  users:
-    - name: root
-      password: racine
-      type: text
-    - name: cloud-user
-      password: nuage
-      type: text
-# Users
 users:
   - default
   - name: root
-    lock_passwd: False
     ssh_authorized_keys: ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFWxleK9RNC9lxZotL95FttjZkgwrlc5TUawbDsyZRx4 kwentine@localhost"]
     shell: /bin/bash
 write_files:
