@@ -1,63 +1,65 @@
-#!/bin/env bash
-qvm_dir="${QVM_DIR:-$(pwd)}"
-output_dir="${qvm_dir}/machines"
-template_dir="${QVM_DIR}/templates"
+#!/usr/bin/env bash
+set -eu
+#+ Create an overlay VM from a base disk image.
+#+ Base images are searched in QVM_DIR/templates,
+#+ and VM disks created in QVM_DIR/machines.
+#+ Usage: SCRIPT [-n] [-b BASE_NAME] [-s SIZE] VM_NAME
 
-help_msg="
-Create an overlay VM from a base disk image.
-Base images are searched in QVM_DIR/templates,
-and VM disks created in QVM_DIR/machines.
-If not set, QVM_DIR defaults to the current directory.
+SCRIPT="$(basename "$0")"
+SCRIPT_DIR="$(dirname "$0")"
+# shellcheck source-path=SCRIPTDIR
+source "${SCRIPT_DIR}/libqvm.sh"
 
-Usage: $(basename "$0") [-n] -b BASE_DISK [-s SIZE] DISK_NAME
-Options:
-  -n                 Dry run
-  -b    BASE_IMAGE
-  -s    SIZE         Default: 8G
-"
+QVM_DIR="${QVM_DIR:-$(pwd)}"
 
-declare base size dry_run
+#+ Options:
+#+ -h  Print this message
+#+ -n  Dry run
 dry_run=0
-size=8G
+#+ -s SIZE  VM disk size. Default: same as base image
+#+ -b BASE_NAME  Base disk image name, without extension.
+#+               Searched in QVM_DIR/templates
+base_disk_name=default
 
 while getopts b:s:nh opt; do
   case "${opt}" in
-    h)
-      echo "${help_msg}"
-      exit 0 ;;
     n)
-      dry_run=1 ;;
+      dry_run=1
+      ;;
     s)
-      size="${OPTARG}" ;;
+      size="${OPTARG}"
+      ;;
     b)
-      base="${OPTARG}" ;;
+      base_disk_name="${OPTARG}"
+      ;;
     *)
-      exit 1 ;;
+      usage "${opt}"
+      ;;
   esac
 done
 shift $((OPTIND - 1))
 
-declare overlay="${1}"
+vm_name="${1}"
+[[ -n "${vm_name:-}" ]] || errexit "required: VM_NAME"
+vm_disk_file="${QVM_DIR}/machines/${vm_name}.qcow2"
 
-if [[ -z "${base:-}" ]] || [[ -z "${overlay:-}" ]]; then
-  echo "ERROR: required: -b BASE_IMAGE DISK_NAME"
-  exit 1
+if [[ -f "${base_disk_name}" ]]; then
+  base_disk_file="${base_disk_name}"
+else
+  printf -v base_disk_file '%s/%s.qcow2' "${QVM_DIR}/templates" "${base_disk_name}"
 fi
 
-declare -a cmd args
-
-if ((dry_run)); then
-  cmd=(echo)
-fi
-cmd+=(qemu-img)
+[[ -n "${base_disk_file}" ]] || errexit "no such file: ${base_disk_file}"
 
 args=(
   create
   -f qcow2
-  -b "${template_dir}/${base}"
+  -b "$(realpath --relative-to "${QVM_DIR}/machines" "${base_disk_file}")"
   -F qcow2
-  "${output_dir}/${overlay}.qcow2"
-  "${size}"
+  "${vm_disk_file}"
 )
+if [[ -n "${size:-}" ]]; then
+  args+=("${size}")
+fi
 
-"${cmd[@]}" "${args[@]}"
+run qemu-img "${args[@]}"
