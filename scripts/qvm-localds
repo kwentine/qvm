@@ -1,6 +1,6 @@
 #!/bin/bash
-#+ Build cloud-init datasource for VM
-#+ Usage: SCRIPT [-h] [-u USER_DATA] VM
+#+ Build cloud-init local datasource for HOST
+#+ Usage: SCRIPT [-h] [-u USER_DATA] HOST
 set -eu
 SCRIPT="$(basename "$0")"
 DIR="$(dirname "$0")"
@@ -8,7 +8,7 @@ DIR="$(dirname "$0")"
 source "${DIR}/libqvm.sh"
 
 QVM_DIR="${QVM_DIR:-/var/vms}"
-DATASOURCE_DIR="${QVM_DIR}/localds"
+LOCALDS_DIR="${QVM_DIR}/localds"
 
 user_data="${DIR}/user-data/cloud.yaml"
 while getopts hu: opt; do
@@ -34,16 +34,12 @@ create_img() {
   truncate --size 256K "${img}"
   mkfs.vfat -n CIDATA "${img}"
   sudo mount -t vfat "${img}" "${mnt_point}"
-  sudo cp "${user_data}" "${mnt_point}/user-data" || return 1
-  cat <<EOF | sudo tee "${mnt_point}/meta-data" >/dev/null
-instance-id: qvm-${vm}
-hostname: ${vm}
-local-hostname: ${vm}
-EOF
+  QVM_HOST="${vm}" envsubst <"${user_data}" |
+    sudo tee "${mnt_point}/user-data" >/dev/null
 }
 
 for vm in "$@"; do
-  img="${DATASOURCE_DIR}/${vm}.img"
+  img="${LOCALDS_DIR}/${vm}.img"
   create_img || errexit "Unable to create image: ${img}"
   info "Created datasource: ${img}"
 done
