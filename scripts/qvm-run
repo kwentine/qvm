@@ -5,6 +5,7 @@
 set -eu
 SCRIPT="$(basename "$0")"
 DIR="$(dirname "$0")"
+# shellcheck source-path=SCRIPTDIR
 source "${DIR}/libqvm.sh"
 
 QVM_DIR="${QVM_DIR:-/var/vms}"
