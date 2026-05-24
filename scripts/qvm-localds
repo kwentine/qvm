@@ -1,16 +1,18 @@
 #!/bin/bash
+# shellcheck disable=SC2119
 #+ Build cloud-init local datasource for HOST
-#+ Usage: SCRIPT [-h] [-u USER_DATA] HOST
+#+ Usage: SCRIPT [-h] [-u USER_DATA] HOST [HOST...]
 set -eu
 SCRIPT="$(basename "$0")"
-DIR="$(dirname "$0")"
+SCRIPT_DIR="$(dirname "$0")"
 # shellcheck source-path=SCRIPTDIR
-source "${DIR}/libqvm.sh"
+source "${SCRIPT_DIR}/libqvm.sh"
 
 QVM_DIR="${QVM_DIR:-/var/vms}"
 LOCALDS_DIR="${QVM_DIR}/localds"
+USERDATA_DIR="${SCRIPT_DIR}/user-data"
 
-user_data="${DIR}/user-data/cloud.yaml"
+user_data=default
 while getopts hu: opt; do
   case "${opt}" in
     u)
@@ -23,6 +25,15 @@ while getopts hu: opt; do
 done
 shift $((OPTIND - 1))
 
+[[ "${#@}" -gt 0 ]] || usage
+
+if [[ -f "${user_data}" ]]; then
+  user_data_file=user_data
+else
+  printf -v user_data_file '%s/%s.yaml' "${USERDATA_DIR}" "${user_data}"
+fi
+[[ -f "${user_data_file}" ]] || errexit "no such file: ${user_data_file}"
+
 mnt_point="$(mktemp -d /tmp/qvm-localds-XXXX)"
 on_exit() {
   sudo umount "${mnt_point}" || true
@@ -34,7 +45,7 @@ create_img() {
   truncate --size 256K "${img}"
   mkfs.vfat -n CIDATA "${img}"
   sudo mount -t vfat "${img}" "${mnt_point}"
-  QVM_HOST="${vm}" envsubst <"${user_data}" |
+  QVM_HOST="${vm}" envsubst <"${user_data_file}" |
     sudo tee "${mnt_point}/user-data" >/dev/null
 }
 
