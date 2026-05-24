@@ -1,5 +1,5 @@
 #!/bin/bash
-#+ Bring Linux bridge named qvm0, with assigned subnet 10.42.0.1/24
+#+ Bring up Linux bridge named qvm0, with assigned subnet 10.42.0.1/24
 #+ Optionally preallocate tap ports.
 #+
 #+ Adapted from: https://wiki.archlinux.org/title/QEMU/Advanced_networking
