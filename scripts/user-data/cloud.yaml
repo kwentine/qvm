@@ -54,26 +54,3 @@ yum_repos:
     baseurl: file:///mnt/dvd/AppStream
     enabled: true
     gpgkey: file:///mnt/dvd/RPM-GPG-KEY-redhat-release
-ca_certs:
-  trusted:
-    # Root CA ceritificate
-    - |
-      -----BEGIN CERTIFICATE-----
-      MIIC/TCCAeWgAwIBAgIUJIPZii+jOBzP6Cmf7NytXmkW4p8wDQYJKoZIhvcNAQEL
-      BQAwDjEMMAoGA1UEAwwDUVZNMB4XDTI1MTAxMDE2MTExMVoXDTI2MTAxMDE2MTEx
-      MVowDjEMMAoGA1UEAwwDUVZNMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKC
-      AQEAwbwJc3/onYtEBbyiOrtFou/kyRyW4/rGYTDTs1+yF6H1sAlAAZqTlGDMIul4
-      Ft5sCj3glWoF4nowM5VNgOHOf46dfzIrlk5oJJUQCCUNQrBZxde7ECLBb60oJXgQ
-      EDs3nbwxmDq3MANlVfT9Lt9Fnt8Ize00xGFFbyyKW51Lp5LYMcQ/AJeLdzpZ2eX9
-      V0QLa/C4jbfyMQnyXsnRsZqnE5LbPx6G9IlyJTldbU/viggrO9FHnFYxs3HWWEVA
-      hW3cQ031PXzi57M+giQhXRTZ0uACXD6KdkgdohD5clcymYl5bam1YkvYHBWFj1Jy
-      U5NJ1yfLfdrEDUZq5HE/gN1rZQIDAQABo1MwUTAdBgNVHQ4EFgQUnsmc4q6cHiK7
-      zPbFylFYAsw5mdEwHwYDVR0jBBgwFoAUnsmc4q6cHiK7zPbFylFYAsw5mdEwDwYD
-      VR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAvobEUuTD8MguS3IwRjRo
-      50woKDDW9CQslHefrMaulewOJlnT5h1uIX/N+of3LrwiOK03Hd9PNx56O/FLHJuR
-      GsF0Ilnn+qvCX7wMS6eHCjHD2uu5EimBBItH2//aUnfD9H8g7D2Z375kJrhjbaLl
-      xfkOyEERlr3CGIiy4Z4bxlzC4Ai/ANGbDYXgOGybmTDv0d5m6hpwuRwctilyrTZe
-      0YFErpQM3VKCYmFU0mrSDcTdmp+F7Wfco4PZ/Okf496/1EoGdTOhxomCRQ3wRIZo
-      Gquyxqvqx0cyFigZv1uRpsylNge3EkNi9EwINk6aUWgs9QY2z0olS40uTRYTnST8
-      Lw==
-      -----END CERTIFICATE-----
