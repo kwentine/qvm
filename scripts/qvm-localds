@@ -46,6 +46,10 @@ create_img() {
   sudo mount -t vfat "${img}" "${mnt_point}"
   QVM_HOST="${vm}" envsubst <"${user_data_file}" |
     sudo tee "${mnt_point}/user-data" >/dev/null
+  cat <<EOF | sudo tee "${mnt_point}/meta-data" >/dev/null
+instance-id: qvm-${vm}-${RANDOM}
+local-hostname: ${vm}
+EOF
 }
 
 for vm in "$@"; do
