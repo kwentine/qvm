@@ -12,6 +12,7 @@ QVM_DIR="${QVM_DIR:-/var/vms}"
 MACHINES_DIR="${QVM_DIR}/machines"
 RUNTIME_DIR="${QVM_DIR}/run"
 LOCALDS_DIR="${QVM_DIR}/localds"
+ISO_DIR="${QVM_DIR}/iso"
 
 #+ Options:
 #+ -h  Print this message and exit.
@@ -25,7 +26,10 @@ detach=0
 user_net=0
 #+ -b  First boot. Display the UEFI menu for 5 seconds.
 first_boot=0
-while getopts :hnduib opt; do
+#+ -r  CDROM  Mount CDROM
+cdrom=
+
+while getopts :hnduibr: opt; do
   case "${opt}" in
     n)
       dry_run=1 ;;
@@ -37,6 +41,8 @@ while getopts :hnduib opt; do
       user_net=1 ;;
     b)
       first_boot=1 ;;
+    r)
+      cdrom="${OPTARG}" ;;
     *)
       usage "${opt}" ;;
   esac
@@ -57,9 +63,19 @@ args=(
   -m 8G
   -drive "file=${drive},format=qcow2,if=virtio"
   -drive "if=pflash,format=raw,readonly=on,file=/usr/share/edk2/ovmf/OVMF_CODE.fd"
-  # TODO: Make this more flexible
-  -cdrom "${QVM_DIR}/iso/rhel-10.0-x86_64-dvd.iso"
 )
+
+if [[ -n "${cdrom:-}" ]]; then
+  if [[ -f "${cdrom}" ]]; then
+    cdrom_file="${cdrom}"
+  else
+    printf -v cdrom_file '%s/%s.yaml' "${ISO_DIR}" "${cdrom}"
+  fi
+  [[ -f "${cdrom}" ]] || errexit "no such file: ${cdrom}"
+  args+=(
+    -cdrom "${cdrom_file}"
+  )
+fi
 
 # On first boot, give ourselves time to select boot device
 if ((first_boot)); then
