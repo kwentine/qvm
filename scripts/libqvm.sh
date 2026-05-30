@@ -29,10 +29,4 @@ run() {
 }
 
 : "${QVM_DIR:=/var/vms}"
-
-repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
-if [[ -n "${repo_root}" ]]; then
-  QVM_CONFIG_DIR=config
-else
-  : "${QVM_CONFIG_DIR:=${HOME}/.config}"
-fi
+: "${QVM_CONFIG_DIR:=${HOME}/.config/qvm}"
