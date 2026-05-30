@@ -69,9 +69,9 @@ if [[ -n "${cdrom:-}" ]]; then
   if [[ -f "${cdrom}" ]]; then
     cdrom_file="${cdrom}"
   else
-    printf -v cdrom_file '%s/%s.yaml' "${ISO_DIR}" "${cdrom}"
+    printf -v cdrom_file '%s/%s.iso' "${ISO_DIR}" "${cdrom}"
   fi
-  [[ -f "${cdrom}" ]] || errexit "no such file: ${cdrom}"
+  [[ -f "${cdrom_file}" ]] || errexit "no such file: ${cdrom_file}"
   args+=(
     -cdrom "${cdrom_file}"
   )
