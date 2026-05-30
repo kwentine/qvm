@@ -1,4 +1,3 @@
----
 # The advertised API endpoint (IP on qvm0, or a DNS name pointing there)
 
 # Needs to be set on nodes that want to join
