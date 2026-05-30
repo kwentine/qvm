@@ -9,7 +9,7 @@ source "${SCRIPT_DIR}/libqvm.sh"
 
 QVM_DIR="${QVM_DIR:-/var/vms}"
 LOCALDS_DIR="${QVM_DIR}/localds"
-USERDATA_DIR="${SCRIPT_DIR}/user-data"
+USERDATA_DIR="${QVM_CONFIG_DIR}/user-data"
 
 user_data=default
 while getopts hu: opt; do
