@@ -1,0 +1,12 @@
+[Unit]
+Descritption=Bring up bridge qvm0
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=%h/src/qvm
+ExecStart=sudo ./scripts/qvm-bridge up
+ExecStop=sudo ./scripts/qvm-bridge down
+
+[Install]
+WantedBy=qvm-net.target
