@@ -1,13 +1,14 @@
-add table inet qvm
-flush table inet qvm
+add table inet qvm0
+flush table inet qvm0
 
-table inet qvm {
+table inet qvm0 {
 
     set masq_interfaces {
 	type ifname
 	elements = { "qvm0" }
     }
 
+    # For monitoring/debugging
     chain FORWARD {
         type filter hook forward priority 0; policy accept;
         counter packets 0 bytes 0

@@ -6,6 +6,8 @@ SCRIPT="$(basename "$0")"
 DIR="$(dirname "$0")"
 source "${DIR}/libqvm.sh"
 
+[[ "$(id -u)" == 0 ]] || errexit "Must be run as root."
+
 #+ Options:
 #+ -h  Print this message
 #+ -n  Dry run: print commands that would be executed
@@ -52,6 +54,7 @@ down() {
     errexit "Unable to stop dnsmasq (${pid}). Stale pid ?"
   fi
   rm -f "${pid_file}"
+  run systemctl dns qvm0 ""
 }
 
 up() {
@@ -78,10 +81,20 @@ up() {
       --pid-file="${pid_file}"
     )
   fi
-  run sudo dnsmasq "${args[@]}"
+  run dnsmasq "${args[@]}"
+}
+
+config() {
+  # TODO: Use configuration file
+  run resolvectl dns qvm0 10.42.0.1
+  run resolvectl domain qvm0 qvm0.lan ~qvm.lan
+  run resolvectl default-route qvm0 no
+  run resolvectl llmnr qvm0 no
+  run resolvectl dnssec qvm0 no
+  run resolvectl status qvm0
 }
 
 case "${action}" in
-  up|down) "${action}" ;;
+  up|down|config) "${action}" ;;
   *) usage ;;
 esac

@@ -1,5 +1,6 @@
 [Unit]
 Descritption=Bring up bridge qvm0
+PartOf=qvm-network.target
 
 [Service]
 Type=oneshot
@@ -9,4 +10,4 @@ ExecStart=sudo ./scripts/qvm-bridge up
 ExecStop=sudo ./scripts/qvm-bridge down
 
 [Install]
-WantedBy=qvm-net.target
+WantedBy=qvm-network.target

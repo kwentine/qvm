@@ -76,6 +76,7 @@ and =dnsmasq= takes care of maintaining corresponding DNS entries.
 So while the =cp= VM may not always get the same IP address,
 =cp.qvm0.lan= will always resolve accurately.
 
+
 * Sources
 I found the following online documentation sources useful:
 
@@ -88,3 +89,4 @@ I found the following online documentation sources useful:
 - [[https://firewalld.org/][Firewalld]]
 - [[https://networkmanager.dev/docs/][NetworkManager]]
 - [[https://wiki.nftables.org/wiki-nftables/index.php/Main_Page][nftables Wiki]]
+- [[https://www.linux-kvm.org/page/Networking][KVM networking guide]]

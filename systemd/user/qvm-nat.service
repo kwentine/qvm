@@ -1,0 +1,15 @@
+[Unit]
+Description=Enable NAT for qvm0 bridge
+PartOf=qvm-network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=%h/src/qvm/scripts
+ExecStartPre=sudo sysctl -w net.ipv4.ip_forward=1
+ExecStart=sudo nft -f net/qvm0.nft
+ExecStop=sudo nft flush table inet qvm0
+ExecStopPost=sudo sysctl -w net.ipv4.ip_forward=0
+
+[Install]
+WantedBy=qvm-network.target
