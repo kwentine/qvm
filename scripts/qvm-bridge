@@ -1,10 +1,12 @@
 #!/bin/bash
-#+ Bring up Linux bridge named qvm0, with assigned subnet 10.42.0.1/24
-#+ Optionally preallocate tap ports.
+#+ Create a virtual bridge with given name and subnet address.
 #+
-#+ Adapted from: https://wiki.archlinux.org/title/QEMU/Advanced_networking
+#+ Usage: SCRIPT [-h] [-d] [-a ADDRESS] [-n NAME] [up|down]
 #+
-#+ Usage: SCRIPT [-h] [-n] [-t N_PORTS]
+#+ Adapted from:
+#+   https://wiki.archlinux.org/title/QEMU/Advanced_networking
+#+   https://www.linux-kvm.org/page/Networking
+
 set -eu
 SCRIPT="$(basename "$0")"
 DIR="$(dirname "$0")"
@@ -12,18 +14,25 @@ DIR="$(dirname "$0")"
 # shellcheck source-path=SCRIPTDIR
 source "${DIR}/libqvm.sh"
 
+[[ "$(id -u)" == 0 ]] || errexit "Must be run as root."
+
 #+ Options:
 #+ -h  Print this message
-#+ -n  Print the commands that would be executed
-#+ -t N_PORTS  TAP ports to pre-allocate
-declare -i nports=0
-while getopts nht: opt; do
+#+ -d  Dry run: print the commands that would be executed
+#+ -a ADDRESS  Bridge address and subnet. Default: 10.42.0.1/24
+br_addr="10.42.0.1/24"
+#+ -n NAME  Bridge name. Default: qvm0
+br_name="qvm0"
+while getopts dhn:a: opt; do
   case "${opt}" in
-    n)
+    d)
       dry_run=1
       ;;
-    t)
-      nports="${OPTARG}"
+    a)
+      br_addr="${OPTARG}"
+      ;;
+    n)
+      br_name="${OPTARG}"
       ;;
     *)
       usage "${opt}"
@@ -32,29 +41,32 @@ while getopts nht: opt; do
 done
 shift $((OPTIND - 1))
 
-br_addr="10.42.0.1/24"
-br_name="qvm0"
-if ! ip link show "${br_name}" &>/dev/null; then
-  run sudo ip link add name "${br_name}" type bridge
-  run sudo ip addr add "${br_addr}" dev "${br_name}"
-  run sudo ip link set dev "${br_name}" up
-fi
-
-declare -i n
-declare port_name
-for ((n = 0; n < nports; n++)); do
-  printf -v port_name '%stap%d' "${br_name}" "${n}"
-  if ! ip link show "${port_name}" &>/dev/null; then
-    echo "Created TAP device ${port_name}, plugged into bridge ${br_name}"
-    run sudo ip tuntap add mode tap "${port_name}" user "${USER}"
-    run sudo ip link set dev "${port_name}" master "${br_name}"
-    run sudo ip link set dev "${port_name}" up
+up() {
+  if ! ip link show "${br_name}" &>/dev/null; then
+    run ip link add name "${br_name}" type bridge
+    run ip addr add "${br_addr}" dev "${br_name}"
+    run ip link set dev "${br_name}" up
+  else
+    info "Brigde ${br_name} already exists, nothing to create!"
   fi
-done
+}
 
-teardown=0
-if ((teardown)); then
-  sudo ip addr del dev "${br_name}" "${br_addr}"
-  sudo ip link set dev "${br_name}" down
-  sudo ip link delete "${br_name}" type bridge
-fi
+down() {
+  if ip link show "${br_name}" &>/dev/null; then
+    ip addr del dev "${br_name}" "${br_addr}"
+    ip link set dev "${br_name}" down
+    ip link delete "${br_name}" type bridge
+  else
+    info "Brigde ${br_name} does not exists, nothing to remove!"
+  fi
+}
+
+action="${1:-up}"
+case "${action}" in
+  up | down)
+    "${action}"
+    ;;
+  *)
+    usage "${action}"
+    ;;
+esac
