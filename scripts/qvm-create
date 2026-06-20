@@ -10,13 +10,13 @@ SCRIPT_DIR="$(dirname "$0")"
 # shellcheck source-path=SCRIPTDIR
 source "${SCRIPT_DIR}/libqvm.sh"
 
-QVM_DIR="${QVM_DIR:-$(pwd)}"
-
 #+ Options:
 #+ -h  Print this message
 #+ -n  Dry run
 dry_run=0
-#+ -s SIZE  VM disk size. Default: same as base image
+#+ -s SIZE  VM disk size.
+#+          Example: 20G
+#+          Default: same as base image
 #+ -b BASE_NAME  Base disk image name, without extension.
 #+               Searched in QVM_DIR/templates
 base_disk_name=default
@@ -39,8 +39,9 @@ while getopts b:s:nh opt; do
 done
 shift $((OPTIND - 1))
 
-vm_name="${1}"
-[[ -n "${vm_name:-}" ]] || errexit "required: VM_NAME"
+vm_name="${1:-}"
+[[ -n "${vm_name}" ]] || errexit "required: VM_NAME"
+
 vm_disk_file="${QVM_DIR}/machines/${vm_name}.qcow2"
 
 if [[ -f "${base_disk_name}" ]]; then
@@ -63,3 +64,4 @@ if [[ -n "${size:-}" ]]; then
 fi
 
 run qemu-img "${args[@]}"
+run qemu-img info "${vm_disk_file}"
