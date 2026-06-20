@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-#+ Build cloud-init local datasource for HOST
-#+ Usage: SCRIPT [-h] [-u USER_DATA] HOST [HOST...]
+#+ Build cloud-init local datasource for VM
+#+ The cloud config file must be named VM and placed in QVM_CONFIG_DIR/user-data
+#+ Occurences of ${QVM_HOST} in the cloud config are replace by VM.
+#+ Usage: SCRIPT [-h] VM
 set -eu
 SCRIPT="$(basename "$0")"
 SCRIPT_DIR="$(dirname "$0")"
@@ -10,12 +12,8 @@ source "${SCRIPT_DIR}/libqvm.sh"
 LOCALDS_DIR="${QVM_DATA_DIR}/localds"
 USERDATA_DIR="${QVM_CONFIG_DIR}/user-data"
 
-user_data=default
-while getopts hu: opt; do
+while getopts h opt; do
   case "${opt}" in
-    u)
-      user_data="${OPTARG}"
-      ;;
     *)
       usage "${opt}"
       ;;
@@ -23,14 +21,11 @@ while getopts hu: opt; do
 done
 shift $((OPTIND - 1))
 
-[[ "${#@}" -gt 0 ]] || usage
+[[ -n "${1:-}" ]] || usage
 
-if [[ -f "${user_data}" ]]; then
-  user_data_file=user_data
-else
-  printf -v user_data_file '%s/%s.yaml' "${USERDATA_DIR}" "${user_data}"
-fi
-[[ -f "${user_data_file}" ]] || errexit "no such file: ${user_data_file}"
+vm="${1}"
+printf -v user_data '%s/%s' "${USERDATA_DIR}" "${vm}"
+[[ -f "${user_data}" ]] || errexit "no such file: ${user_data}"
 
 mnt_point="$(mktemp -d /tmp/qvm-localds-XXXX)"
 on_exit() {
@@ -43,7 +38,7 @@ create_img() {
   truncate --size 256K "${img}"
   mkfs.vfat -n CIDATA "${img}"
   sudo mount -t vfat "${img}" "${mnt_point}"
-  QVM_HOST="${vm}" envsubst <"${user_data_file}" |
+  QVM_HOST="${vm}" envsubst <"${user_data}" |
     sudo tee "${mnt_point}/user-data" >/dev/null
   cat <<EOF | sudo tee "${mnt_point}/meta-data" >/dev/null
 instance-id: qvm-${vm}-${RANDOM}
@@ -51,8 +46,6 @@ local-hostname: ${vm}
 EOF
 }
 
-for vm in "$@"; do
-  img="${LOCALDS_DIR}/${vm}.img"
-  create_img || errexit "Unable to create image: ${img}"
-  info "Created datasource: ${img}"
-done
+printf -v img "%s/%s.img" "${LOCALDS_DIR}" "${vm}"
+create_img || errexit "Unable to create image: ${img}"
+info "Created datasource: ${img}"
