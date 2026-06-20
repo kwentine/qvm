@@ -1,18 +1,17 @@
 #!/bin/env bash
 #+ Boot a VM from a disk image in the QVM_DIR/machines directory.
 #+ Optionally enable cloud-init, with seed disk in the QVM_DIR/localds directory.
-#+ Usage: SCRIPT [-n] [-u] [-d] [-b] [-i] VM_NAME
+#+ Usage: SCRIPT [-n] [-u] [-d] [-i] VM_NAME
 set -eu
 SCRIPT="$(basename "$0")"
 DIR="$(dirname "$0")"
 # shellcheck source-path=SCRIPTDIR
 source "${DIR}/libqvm.sh"
 
-QVM_DIR="${QVM_DIR:-/var/vms}"
-MACHINES_DIR="${QVM_DIR}/machines"
-RUNTIME_DIR="${QVM_DIR}/run"
-LOCALDS_DIR="${QVM_DIR}/localds"
-ISO_DIR="${QVM_DIR}/iso"
+MACHINES_DIR="${QVM_DATA_DIR}/machines"
+RUNTIME_DIR="${QVM_DATA_DIR}/run"
+LOCALDS_DIR="${QVM_DATA_DIR}/localds"
+ISO_DIR="${QVM_DATA_DIR}/iso"
 
 #+ Options:
 #+ -h  Print this message and exit.
@@ -24,12 +23,12 @@ dry_run=0
 detach=0
 #+ -u  User mode networking
 user_net=0
-#+ -b  First boot. Display the UEFI menu for 5 seconds.
-first_boot=0
 #+ -r  CDROM  Mount CDROM
 cdrom=
+#+ -c  Source configuration file
+source_config=0
 
-while getopts :hnduibr: opt; do
+while getopts :hnduicr: opt; do
   case "${opt}" in
     n)
       dry_run=1 ;;
@@ -39,10 +38,10 @@ while getopts :hnduibr: opt; do
       detach=1 ;;
     u)
       user_net=1 ;;
-    b)
-      first_boot=1 ;;
     r)
       cdrom="${OPTARG}" ;;
+    c)
+      source_config=1 ;;
     *)
       usage "${opt}" ;;
   esac
@@ -55,14 +54,23 @@ vm="${1:-}"
 drive="${MACHINES_DIR}/${vm}.qcow2"
 [[ -f "${drive}" ]] || errexit "Disk file not found: ${drive}"
 
+
+config_file="${QVM_CONFIG_DIR}/machines/${vm}"
+if ((source_config)); then
+  [[ -f "${config_file}" ]] || errexit "Config file not found: ${config_file}"
+  # shellcheck disable=SC1090
+  source "${config_file}"
+fi
+
 args=(
   -name "${vm}"
   -accel kvm
   -cpu host
-  -smp 4
-  -m 8G
+  -smp "${smp:-4}"
+  -m "${m:-8G}"
   -drive "file=${drive},format=qcow2,if=virtio"
-  -drive "if=pflash,format=raw,readonly=on,file=/usr/share/edk2/ovmf/OVMF_CODE.fd"
+  -serial mon:pty
+  -display none
 )
 
 if [[ -n "${cdrom:-}" ]]; then
@@ -77,11 +85,6 @@ if [[ -n "${cdrom:-}" ]]; then
   )
 fi
 
-# On first boot, give ourselves time to select boot device
-if ((first_boot)); then
-  args+=(-boot "menu=on,splash-time=5000")
-fi
-
 if ((cloud_init)); then
   seed="${LOCALDS_DIR}/${vm}.img"
   [[ -e "${seed}" ]] || errexit "Invalid datasource: ${seed}"
@@ -92,7 +95,7 @@ fi
 # generating a new one if missing.
 macaddr() {
   local key="${1:-}"
-  local conf="${QVM_DIR}/etc/macs"
+  local conf="${QVM_CONFIG_DIR}/macs"
   while read -r name macaddr; do
     # When hitting break, macaddr holds the sought address
     [[ "${name}" == "${key}" ]] && break
@@ -116,17 +119,9 @@ else
 fi
 
 # Headless mode (-d option), as opposed to graphical QEMU display
-# A more succinct choice of option could have been:
-#   -display none -serial mon:pty
-# Here however, a fancy VirtIO serial port is enabled
 if ((detach)); then
   args+=(
     -daemonize
-    -display none
-    -device virtio-serial-pci
-    -chardev "pty,mux=on,id=char0"
-    -mon "chardev=char0,mode=readline"
-    -device "virtconsole,chardev=char0"
     -pidfile "${RUNTIME_DIR}/${vm}".pid
   )
 fi
