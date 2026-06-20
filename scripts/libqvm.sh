@@ -28,5 +28,5 @@ run() {
   "$@"
 }
 
-: "${QVM_DIR:=/var/vms}"
+: "${QVM_DIR:=/opt/qvm}"
 : "${QVM_CONFIG_DIR:=${HOME}/.config/qvm}"
