@@ -1,7 +1,7 @@
 #!/bin/env bash
-#+ Boot a VM from a disk image in the QVM_DIR/machines directory.
-#+ Optionally enable cloud-init, with seed disk in the QVM_DIR/localds directory.
-#+ Usage: SCRIPT [-n] [-u] [-d] [-i] VM_NAME
+#+ Boot a VM from a disk image in QVM_DATA_DIR/machines.
+#+ If found in QVM_DATA_DIR/localds, a cloud-init local data source is added.
+#+ Usage: SCRIPT [-n] [-u] [-d] VM
 set -eu
 SCRIPT="$(basename "$0")"
 DIR="$(dirname "$0")"
@@ -15,33 +15,21 @@ ISO_DIR="${QVM_DATA_DIR}/iso"
 
 #+ Options:
 #+ -h  Print this message and exit.
-#+ -i  Enable cloud-init.
-cloud_init=0
 #+ -n  Dry run. Print the commands that would be executed.
 dry_run=0
 #+ -d  Daemonize the QEMU process, running it in the background.
 detach=0
 #+ -u  User mode networking
 user_net=0
-#+ -r  CDROM  Mount CDROM
-cdrom=
-#+ -c  Source configuration file
-source_config=0
 
-while getopts :hnduicr: opt; do
+while getopts :hndu opt; do
   case "${opt}" in
     n)
       dry_run=1 ;;
-    i)
-      cloud_init=1 ;;
     d)
       detach=1 ;;
     u)
       user_net=1 ;;
-    r)
-      cdrom="${OPTARG}" ;;
-    c)
-      source_config=1 ;;
     *)
       usage "${opt}" ;;
   esac
@@ -54,10 +42,8 @@ vm="${1:-}"
 drive="${MACHINES_DIR}/${vm}.qcow2"
 [[ -f "${drive}" ]] || errexit "Disk file not found: ${drive}"
 
-
 config_file="${QVM_CONFIG_DIR}/machines/${vm}"
-if ((source_config)); then
-  [[ -f "${config_file}" ]] || errexit "Config file not found: ${config_file}"
+if [[ -f "${config_file}" ]]; then
   # shellcheck disable=SC1090
   source "${config_file}"
 fi
@@ -85,40 +71,26 @@ if [[ -n "${cdrom:-}" ]]; then
   )
 fi
 
-if ((cloud_init)); then
-  seed="${LOCALDS_DIR}/${vm}.img"
-  [[ -e "${seed}" ]] || errexit "Invalid datasource: ${seed}"
-  args+=(-drive "file=${seed},if=virtio,format=raw")
+# Add cloud-init local data source
+printf -v localds "%s/%s.img" "${LOCALDS_DIR}" "${vm}"
+if [[ -f "${localds}" ]]; then
+  args+=(-drive "file=${localds},if=virtio,format=raw")
 fi
-
-# Retrieve this VM's MAC address from static configuration,
-# generating a new one if missing.
-macaddr() {
-  local key="${1:-}"
-  local conf="${QVM_CONFIG_DIR}/macs"
-  while read -r name macaddr; do
-    # When hitting break, macaddr holds the sought address
-    [[ "${name}" == "${key}" ]] && break
-    macaddr=""
-  done <"${conf}"
-  if [[ -z "${macaddr:-}" ]]; then
-    printf -v macaddr "52:54:%02x:%02x:%02x:%02x" \
-           $(( RANDOM & 0xff)) $(( RANDOM & 0xff)) \
-           $(( RANDOM & 0xff)) $(( RANDOM & 0xff))
-    echo "${key}" "${macaddr}" >> "${conf}"
-  fi
-  echo "${macaddr}"
-}
 
 if ((user_net)); then
   printf -v port "22%02d" $((RANDOM * 100 / 32767 ))
   info "SSH host port: ${port}"
   args+=(-nic "user,model=virtio,hostfwd=tcp::${port}-:22")
 else
-  args+=(-nic "bridge,br=qvm0,model=virtio,mac=$(macaddr "${vm}")")
+  if [[ -z "${mac:-}" ]]; then
+    printf -v mac "52:54:%02x:%02x:%02x:%02x" \
+           $(( RANDOM & 0xff)) $(( RANDOM & 0xff)) \
+           $(( RANDOM & 0xff)) $(( RANDOM & 0xff))
+  fi
+  args+=(-nic "bridge,br=qvm0,model=virtio,mac=${mac}")
 fi
 
-# Headless mode (-d option), as opposed to graphical QEMU display
+# Run in the background
 if ((detach)); then
   args+=(
     -daemonize
