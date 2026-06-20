@@ -1,0 +1,8 @@
+[Unit]
+Description=Start jumpbox VM
+# Requires=qvm-network.target
+# After=qvm-network.target
+
+[Service]
+Type=exec
+ExecStart=/opt/qvm/bin/qvm-run -c r0
