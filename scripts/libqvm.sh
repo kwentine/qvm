@@ -29,4 +29,5 @@ run() {
 }
 
 : "${QVM_DIR:=/opt/qvm}"
-: "${QVM_CONFIG_DIR:=${HOME}/.config/qvm}"
+: "${QVM_DATA_DIR:=/var/opt/qvm}"
+: "${QVM_CONFIG_DIR:=/etc/opt/qvm}"
