@@ -1,0 +1,20 @@
+[Unit]
+Description=Start dnsmasq server on interface qvm0
+PartOf=qvm-network.service
+Requires=qvm-bridge.service
+After=qvm-bridge.service
+
+[Service]
+Type=exec
+ExecStart=dnsmasq --keep-in-foreground --conf-file=/etc/opt/qvm/dnsmasq.conf
+# TODO: Use configuration file!
+ExecStartPost=resolvectl dns qvm0 10.42.0.1
+ExecStartPost=resolvectl domain qvm0 qvm0.lan ~qvm.lan
+ExecStartPost=resolvectl default-route qvm0 no
+ExecStartPost=resolvectl llmnr qvm0 no
+ExecStartPost=resolvectl dnssec qvm0 no
+ExecStartPost=resolvectl status qvm0
+ExecStopPost=resolvectl dns qvm0 ""
+
+[Install]
+WantedBy=qvm-network.target

@@ -4,10 +4,8 @@ PartOf=qvm-network.target
 
 [Service]
 Type=oneshot
-RemainAfterExit=yes
-WorkingDirectory=%h/src/qvm
-ExecStart=sudo ./scripts/qvm-bridge up
-ExecStop=sudo ./scripts/qvm-bridge down
+ExecStart=/opt/qvm/bin/qvm-bridge up
+ExecStop=/opt/qvm/bin/qvm-bridge down
 
 [Install]
 WantedBy=qvm-network.target
