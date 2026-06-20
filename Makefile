@@ -1,16 +1,27 @@
 SHELL := /bin/env bash
 PREFIX := /opt/qvm
 BIN_DIR := $(PREFIX)/bin
-SRC_DIR := scripts
+CONFIG_DIR := /etc/opt/qvm
+INSTALL_DIRS := $(BIN_DIR) $(CONFIG_DIR)
 
-install: | $(BIN_DIR)
-install: install-bin
+SCRIPTS := qvm-run qvm-bridge qvm-create qvm-localds libqvm.sh
+CONFIG_FILES := dnsmasq.conf qvm0.nft
 
-install-bin: $(addprefix $(BIN_DIR)/,qvm-run qvm-bridge qvm-create qvm-localds libqvm.sh) | $(BIN_DIR)
+install: | $(INSTALL_DIRS)
+install: install-bin install-config
 
-$(BIN_DIR):
+install-bin: $(addprefix $(BIN_DIR)/,$(SCRIPTS))
+
+install-config: $(addprefix $(CONFIG_DIR)/,$(CONFIG_FILES))
+
+uninstall:
+	rm $(BIN_DIR)/*
+
+$(INSTALL_DIRS):%:
 	mkdir -p $@
-	sudo chown -R "kwentine:kwentine" $@
 
-$(BIN_DIR)/%: $(SRC_DIR)/%
+$(BIN_DIR)/%: scripts/%
 	install $^ $(BIN_DIR)
+
+$(CONFIG_DIR)/%: config/%
+	cp $^ $@
