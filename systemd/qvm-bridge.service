@@ -4,6 +4,7 @@ PartOf=qvm-network.target
 
 [Service]
 Type=oneshot
+RemainAfterExit=yes
 ExecStart=/opt/qvm/bin/qvm-bridge up
 ExecStop=/opt/qvm/bin/qvm-bridge down
 
