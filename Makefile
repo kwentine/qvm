@@ -1,20 +1,14 @@
-SHELL=/bin/env bash
-NET_DIR=scripts/net
-QVM_DIR ?= /var/vms
-QVM_RUNTIME_DIR := $(QVM_DIR)/run
-VMS=cp wk1 wk2
+SHELL := /bin/env bash
+PREFIX := /opt/qvm
+BIN_DIR := $(PREFIX)/bin
+SRC_DIR := scripts
 
-firewall:
-	$(SHELL) $(NET_DIR)/host-setup.sh
-bridge:
-	$(SHELL) scripts/qvm-bridge
-dns-logs:
-	@journalctl -b --no-pager SYSLOG_IDENTIFIER=dnsmasq
-clean:
-	@rm -f $(QVM_RUNTIME_DIR)/dnsmasq.pcap
+install: | $(BIN_DIR)
+install: $(addprefix $(BIN_DIR)/,qvm-run qvm-bridge libqvm.sh) | $(BIN_DIR)
 
-localds:
-	$(SHELL) scripts/qvm-localds $(VMS)
+$(BIN_DIR):
+	mkdir -p $@
+	sudo chown -R "kwentine:kwentine" $@
 
-clean-localds:
-	cd $(QVM_DIR)/localds && rm -f $(addsuffix .img, $(VMS))
+$(BIN_DIR)/%: $(SRC_DIR)/%
+	install $^ $(BIN_DIR)
