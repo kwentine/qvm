@@ -14,8 +14,6 @@ DIR="$(dirname "$0")"
 # shellcheck source-path=SCRIPTDIR
 source "${DIR}/libqvm.sh"
 
-[[ "$(id -u)" == 0 ]] || errexit "Must be run as root."
-
 #+ Options:
 #+ -h  Print this message
 #+ -d  Dry run: print the commands that would be executed
@@ -40,6 +38,8 @@ while getopts dhn:a: opt; do
   esac
 done
 shift $((OPTIND - 1))
+
+[[ "$(id -u)" == 0 ]] || errexit "Must be run as root."
 
 up() {
   if ! ip link show "${br_name}" &>/dev/null; then
