@@ -24,11 +24,10 @@ install-bin: $(addprefix $(BIN_DIR)/,$(SCRIPTS))
 install-config: $(addprefix $(CONFIG_DIR)/,$(CONFIG_FILES))
 
 install-units: $(UNIT_FILES:%=$(DESTDIR)$(UNIT_DIR)/%)
-	$(if $(DESTDIR),,systemctl daemon-reload)
 
 $(DESTDIR)$(UNIT_DIR)/%: systemd/%
 	install -m 0644 -D $^ $@
-	$(if $(DESTDIR),,systemctl link $@)
+	$(if $(DESTDIR),,systemctl enable $@)
 
 uninstall-units:
 	$(RM) $(addprefix $(DESTDIR)$(UNIT_DIR)/,$(UNIT_FILES))
