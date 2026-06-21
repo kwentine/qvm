@@ -31,4 +31,4 @@ $(CONFIG_DIR)/%: config/%
 	cp $^ $@
 
 $(UNIT_DIR)/%: systemd/%
-	sudo cp $^ $@
+	cp $^ $@
