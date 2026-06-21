@@ -1,7 +1,7 @@
 [Unit]
 Description=Start r0
-# Requires=qvm-network.target
-# After=qvm-network.target
+Wants=qvm-network.target
+After=qvm-network.target
 
 [Service]
 Type=exec
