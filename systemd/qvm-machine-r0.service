@@ -5,4 +5,4 @@ Description=Start r0
 
 [Service]
 Type=exec
-ExecStart=/opt/qvm/bin/qvm-run -c r0
+ExecStart=/opt/qvm/bin/qvm-run r0
