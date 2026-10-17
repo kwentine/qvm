@@ -4,3 +4,4 @@
 .env
 values.auto.pkrvars.hcl
 *.fd
+scratch
