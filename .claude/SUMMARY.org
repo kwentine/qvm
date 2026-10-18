@@ -1,0 +1,29 @@
+#+TITLE: QVM — session summary
+#+STARTUP: overview
+
+* Branch =simplify=
+** 2026-10-17 — Initial review
+- Reviewed scripts, units, Makefile, configs, docs; wrote [[file:PLAN.org]].
+- No code changed yet.
+- Next: user answers the open questions in PLAN.org, then Phase 0 (bug triage) on this branch.
+** 2026-10-17 — Decisions
+- Experiments (=fedora/ k8s/ rhel/ rke2/ scripts/{certs,bootc}=) are lumber: out of scope.
+- Keep FHS =/opt= layout with =systemctl link=; PLAN.org updated accordingly
+  (=/opt/qvm= as a Python venv for the future CLI; user units linked via =make install-user=).
+- Bridge: NM keyfile drafted in =config/qvm0.nmconnection= (scripts kept, educational).
+- Python CLI: go. Disks: only =/var/opt/qvm= with a =qvm= group.
+- Host is Fedora Atomic Sericea: =/opt= → =/var/opt= (same tree for code and data!);
+  =nftables.service= flushes the ruleset on reload → =qvm-nat.service= must follow it.
+- Next: user reviews NM keyfile; OK on moving lumber; then Phase 0.
+** 2026-10-18 — Phase 0 (uncommitted)
+- Lumber removed by user (342d230). NM keyfile validated on host by user.
+- Fixed: unit typos/PartOf, single =QVM_DATA_DIR=/var/opt/qvm=, =QVM_CONFIG_DIR=~/.config/qvm=,
+  qvm-create checks, qvm-bridge dry-run, qvm-localds =.yaml= + tmpdir, shebangs.
+- Stable MAC from sha256(VM name) in qvm-run.
+- Makefile rewritten: =BRIDGE=nm|script=, DESTDIR, uninstall, =qvm= group, bridge.conf.
+- Units: resolvectl moved to qvm-bridge.service; qvm-dns BindsTo the qvm0 device; dnsmasq =bind-dynamic=,
+  lease file =/var/lib/dnsmasq/qvm0.leases= (SELinux).
+- README.org and docs/net.org rewritten for the current state; user-data turned into =rhel.example.yaml=.
+- Pending user decisions (TODO.org #phase-0): vvfat seeds (tested OK with qemu-img/qemu 10.2),
+  ip_forward never-off + forward hardening + nftables.service coupling.
+- Host migration steps listed in TODO.org.

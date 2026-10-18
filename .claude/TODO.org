@@ -1,0 +1,153 @@
+#+STARTUP: folded
+#+TAGS: plan(p) question(q) docs(d)
+#+TODO: TODO(t) DOING(p) WAITING(w) CANCELLED(c) | DONE(d)
+
+* DONE Create a PLAN.org for future work
+- Share general feedback about the state and scope of the project
+- Propose some next steps given the improvement ideas outlined in CLAUDE.md
+** Result
+- See [[file:PLAN.org]]: feedback, target architecture, phased roadmap.
+- Key idea: split *host side* (root, declarative config files) from *machine side*
+  (unprivileged =qvm= CLI + =systemd --user= template units).
+
+* DONE Answer open questions blocking Phase 0/1                 :question:
+See [[file:PLAN.org::*Open questions for you][PLAN.org: Open questions]] (bridge owner, Python, firewalld/toolbox, disk location).
+- [X] Scope: experiments are lumber
+- [X] Prefix: keep =/opt= + =systemctl link=
+- [X] Bridge: NM keyfile ([[file:../config/qvm0.nmconnection]]), scripts kept
+- [X] Python: yes
+- [X] Host: Sericea, =nftables.service=, layered qemu
+- [X] Disks: only =/var/opt/qvm=
+- [X] Lumber: removed (commit 342d230)
+
+* DONE Review NM keyfile draft [[file:../config/qvm0.nmconnection]]
+- [X] Try: =sudo install -m 0600 config/qvm0.nmconnection /etc/NetworkManager/system-connections/ && sudo nmcli connection reload=
+  (stop =qvm-bridge.service= first: both want to create =qvm0=)
+- [X] Check: =resolvectl status qvm0= should show DNS 10.42.0.1, domains =qvm0.lan ~qvm.lan=, default-route no
+
+Tested both, great improvement!
+
+- [X] Add this installation step to the Makefile → =sudo make install= (=BRIDGE=nm=, default)
+
+I would like to keep the qvm-bridge script for educational purposes,
+and a fallback for systems that may not have NetworkManager.
+- [X] Kept: =sudo make install BRIDGE=script= installs/enables =qvm-bridge.service= instead of the keyfile.
+- [X] The =resolvectl= calls moved from =qvm-dns.service= to =qvm-bridge.service=:
+  they configure the link, which is what the keyfile does in the NM case.
+
+* DOING Fix some phase 0 bugs
+:PROPERTIES:
+:CUSTOM_ID: phase-0
+:END:
+
+** Done (uncommitted, see =git status=)
+All rows of the first table, plus:
+- =QVM_CONFIG_DIR= now defaults to =~/.config/qvm= (per CLAUDE.md), =QVM_DIR= is gone: one =QVM_DATA_DIR=/var/opt/qvm=.
+- =qvm-create -b= accepts names with or without =.qcow2= (the README used the extension, the script appended it again).
+- Example user-data: =host:= is not a cloud-config key (silently ignored) → =hostname:=.
+  Your original is in =scratch/rhel10-rke2.yaml=. The rename is staged (=git mv=).
+- Makefile rewritten: GNU variable names, =DESTDIR= everywhere, phony targets, =uninstall=,
+  =qvm= group with setgid data dirs, =allow qvm0= in =/etc/qemu/bridge.conf=.
+  System actions (=groupadd=, =systemctl=, =nmcli=) only when =DESTDIR= is empty.
+  Tested: staged install, =make -n= of the live steps.
+- shellcheck clean, shfmt applied, =dnsmasq --test= OK.
+
+** Migrating your host
+The old Makefile enabled *every* unit, including =qvm-bridge.service= and =qvm-machine-r0.service=.
+Left enabled, =qvm-bridge.service= would delete NM's =qvm0= on stop. So:
+#+begin_src sh
+  sudo systemctl stop qvm-network.target
+  sudo systemctl disable qvm-bridge.service qvm-machine-r0.service   # old leftovers
+  sudo make uninstall && sudo make install
+  sudo usermod -aG qvm "$USER"            # log in again
+  # move your data from /var/vms to /var/opt/qvm/{templates,machines,localds,iso}
+  # move user-data files to ~/.config/qvm/user-data/VM.yaml, machine configs to ~/.config/qvm/machines/VM
+  sudo systemctl start qvm-network.target
+#+end_src
+
+** Original table
+The following can be a starting point:
+| Where                                       | Problem                                                                                                    |
+|---------------------------------------------+------------------------------------------------------------------------------------------------------------|
+| [[file:../systemd/qvm-bridge.service]]          | =Descritption= typo                                                                                        |
+| [[file:../systemd/qvm-dns.service]]             | =PartOf=qvm-network.service= → should be =.target=                                                         |
+| [[file:../scripts/libqvm.sh]] vs scripts        | =qvm-create= uses =QVM_DIR/{templates,machines}=, =qvm-run= uses =QVM_DATA_DIR/machines=: disks not found  |
+| [[file:../scripts/qvm-create]]                  | =[[ -n "${base_disk_file}" ]]= always true; should be =-f=                                                 |
+| [[file:../scripts/qvm-bridge]]                  | =down()= ignores dry-run (no =run= prefix)                                                                 |
+| [[file:../Makefile]]                            | =DESTDIR= only on units; =$(HOME)= under =sudo= is =/root=; =cp= without =mkdir=; no =uninstall=           |
+| [[file:../README.org]], [[file:../docs/net.org]]    | reference scripts that no longer exist (=qvm-setup-host=, =qvm-dns=, =bridge-up.sh=, veth DHCP…)           |
+| [[file:../config/user-data/rhel10-rke2.yaml]]   | committed passwords (lab-grade, but publish as =*.example.yaml= with placeholders)                         |
+| =#!/bin/env bash=                           | works on Fedora (usrmerge) but =/usr/bin/env= is the portable spelling                                     |
+
+For the following I need some additional context and proposed fixes, that you can put in this TODO entry
+| [[file:../scripts/qvm-run]]                     | *Random MAC each boot* + DHCP range of 11 addresses → new lease per boot, pool exhaustion, IP churn        |
+
+I extendend the DHCP range, no reason to have it only 11.
+I like the idea of deriving the MAC from the name. How would you go about it?
+Ultimately, we should also allow the MAC to be configured in the TOML file.
+- *Answer* (implemented in [[file:../scripts/qvm-run]]): =52:54:00= + the first 3 bytes of =sha256(VM name)=.
+  #+begin_src sh
+    hash="$(printf '%s' "${vm}" | sha256sum)"
+    mac="52:54:00:${hash:0:2}:${hash:2:2}:${hash:4:2}"
+  #+end_src
+  - =52:54:00= is QEMU's own default prefix; its first byte has the "locally administered" bit set, so no clash with real hardware.
+  - 24 bits from the hash: collision odds for 20 VMs ≈ 20²/2²⁵ ≈ 1 in 80 000.
+  - dnsmasq also picks a client's address by hashing its MAC, so even after a lease expires the IP usually stays the same.
+    To pin one: =dhcp-host=cp,10.42.0.10= in =dnsmasq.conf=.
+  - =mac=…= in the machine config still overrides it; in TOML it becomes =mac = "52:54:00:…"=.
+  - Later, multiple bridges: hash =bridge/name= instead, so the same VM name differs per bridge.
+
+| [[file:../scripts/qvm-localds]]                 | needs =sudo mount= (breaks user services); tmp mountpoint never removed; reads =user-data/VM= (no =.yaml=) |
+
+What is your proposed alternative? Could we do an =unshare= trick?
+I liked the idea of a VFAT volume because it requires no extra tooling a la xorriso.
+The tmp mountpoint is removed by the on_exit EXIT trap. Is that flawed?
+You can go ahead and fix the `.yaml` inconsistency.
+- *Done*: =.yaml= fixed.
+- *Trap*: yes, flawed. =umount= does not remove the directory, so each run left an empty =/tmp/qvm-localds-XXXX=.
+  Fixed with =rmdir= in =on_exit=.
+- *unshare*: no. A user namespace lets you mount only filesystems marked safe for it (tmpfs, overlay, proc, FUSE…).
+  vfat is a block-device filesystem: mounting it needs =CAP_SYS_ADMIN= in the /initial/ namespace, i.e. real root.
+- *Proposal: let QEMU make the VFAT disk itself* (its =vvfat= driver). Write =user-data= and =meta-data= to
+  =/var/opt/qvm/localds/VM/= as plain files, and attach the directory:
+  #+begin_src sh
+    -drive if=virtio,format=raw,read-only=on,file.driver=vvfat,file.dir=/var/opt/qvm/localds/VM,file.label=CIDATA
+  #+end_src
+  - Still VFAT, zero extra tooling (not even =mkfs.vfat=), no root, no image file, no mount.
+  - Checked here with qemu 10.2 (Fedora 44): the guest sees a partition with =LABEL=CIDATA TYPE=vfat=,
+    long file names intact — what cloud-init's NoCloud looks for. Not yet booted with a real cloud image.
+  - Caveats: vvfat is "experimental" in read-write mode (we use read-only); RHEL builds of qemu disable it (your host is Fedora).
+  - =qvm-localds= shrinks to =envsubst= + =cat >meta-data=.
+  - Fallback if vvfat ever disappoints: =mcopy= from mtools writes into a vfat image without mounting.
+  - [ ] Go ahead with vvfat?
+
+| [[file:../config/dnsmasq.conf]]                 | no =dhcp-leasefile= → shares =/var/lib/dnsmasq/dnsmasq.leases= with any other dnsmasq                      |
+Not a problem in my case, I only use dnsmasq for this purpose.
+But I agree we could create a lease file in `/var/opt/qvm`.
+- *Done*, but in =/var/lib/dnsmasq/qvm0.leases=: dnsmasq runs confined by SELinux (=dnsmasq_t=, enforcing on Sericea),
+  which may write leases only where they are labelled =dnsmasq_lease_t=, i.e. =/var/lib/dnsmasq=.
+  =/var/opt/qvm= would mean a custom SELinux file context: not worth it.
+
+| [[file:../systemd/qvm-nat.service]]             | =ExecStopPost= sets =ip_forward=0= globally: breaks podman/libvirt/docker if they run                      |
+I never encountered any issues with podman, that I mostly run rootless. In what cases can this be a problem?
+I introduced this because on my system ip_forward=0 by default?
+What are our alternatives? Just not turning it off afterwards?
+- *Why rootless podman never noticed*: it uses userspace networking (pasta/slirp4netns), not kernel forwarding.
+- *Who breaks*: anything routing through the host kernel: rootful podman/docker, libvirt (=virbr0=),
+  NetworkManager "shared" connections, WireGuard/Tailscale exit nodes. They turn forwarding on when they start;
+  stopping qvm-nat later turns it off under their feet, and their guests lose connectivity silently.
+- *Default*: yes, the kernel defaults to =0= and Fedora keeps it, so turning it on is needed.
+- *Alternatives*:
+  1. Turn on, never off (recommended): =/etc/sysctl.d/90-qvm.conf= with =net.ipv4.ip_forward = 1=, installed by make.
+  2. Save the previous value on start, restore it on stop: fragile when several tools do the same.
+  3. Per-interface =net.ipv4.conf.qvm0.forwarding=: does not suffice, replies arrive on the uplink (wifi/ethernet), which needs it too.
+- *Side effect to know*: with forwarding on and no forward filtering, a machine on your LAN that uses your laptop as gateway
+  could reach the VMs. Cheap hardening in =qvm0.nft=: in =FORWARD=, drop new connections /into/ =qvm0= that do not come from =qvm0=.
+- Also pending here: tie =qvm-nat.service= to =nftables.service=, whose reload flushes the =qvm0= table (see PLAN.org Host facts).
+  - [ ] OK for option 1 + hardening + nftables coupling?
+
+** TODO Can you explain BindsTo ?                                  :question:
+The following is unclear to me:
+
+- =qvm-dns.service= now =BindsTo= the =qvm0= device unit (=sys-subsystem-net-devices-qvm0.device=),
+  so it works whoever creates the bridge. dnsmasq uses =bind-dynamic= for the same reason.
