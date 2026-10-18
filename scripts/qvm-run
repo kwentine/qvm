@@ -1,6 +1,7 @@
-#!/bin/env bash
+#!/usr/bin/env bash
 #+ Boot a VM from a disk image in QVM_DATA_DIR/machines.
 #+ If found in QVM_DATA_DIR/localds, a cloud-init local data source is added.
+#+ Optional settings (smp, m, mac, cdrom) are sourced from QVM_CONFIG_DIR/machines/VM.
 #+ Usage: SCRIPT [-n] [-u] [-d] VM
 set -eu
 SCRIPT="$(basename "$0")"
@@ -25,13 +26,17 @@ user_net=0
 while getopts :hndu opt; do
   case "${opt}" in
     n)
-      dry_run=1 ;;
+      dry_run=1
+      ;;
     d)
-      detach=1 ;;
+      detach=1
+      ;;
     u)
-      user_net=1 ;;
+      user_net=1
+      ;;
     *)
-      usage "${opt}" ;;
+      usage "${opt}"
+      ;;
   esac
 done
 shift $((OPTIND - 1))
@@ -78,14 +83,15 @@ if [[ -f "${localds}" ]]; then
 fi
 
 if ((user_net)); then
-  printf -v port "22%02d" $((RANDOM * 100 / 32767 ))
+  printf -v port "22%02d" $((RANDOM * 100 / 32767))
   info "SSH host port: ${port}"
   args+=(-nic "user,model=virtio,hostfwd=tcp::${port}-:22")
 else
   if [[ -z "${mac:-}" ]]; then
-    printf -v mac "52:54:%02x:%02x:%02x:%02x" \
-           $(( RANDOM & 0xff)) $(( RANDOM & 0xff)) \
-           $(( RANDOM & 0xff)) $(( RANDOM & 0xff))
+    # Stable MAC derived from the VM name: same name, same DHCP lease, same IP.
+    # 52:54:00 is the prefix QEMU uses for its own default MACs.
+    hash="$(printf '%s' "${vm}" | sha256sum)"
+    mac="52:54:00:${hash:0:2}:${hash:2:2}:${hash:4:2}"
   fi
   args+=(-nic "bridge,br=qvm0,model=virtio,mac=${mac}")
 fi
