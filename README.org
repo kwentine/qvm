@@ -1,79 +1,85 @@
-#+TITLE: Equipment to work with QEMU VMs
+#+TITLE: QVM: networked QEMU virtual machines on a Linux host
 
-To bring up the appartus:
+A small set of helpers to run QEMU VMs on a shared bridge,
+with DHCP, DNS and internet access.
 
-- Setup the environment.
-  This defines the =QVM_DIR= directory where virtual machine disks are stored,
-  and adds the =scripts= directory to the =PATH= variable.
-
-#+begin_src sh :tangle setup.sh
-  source env.sh
+* Installation
+#+begin_src sh
+  sudo make install                 # NetworkManager creates the qvm0 bridge
+  sudo make install BRIDGE=script   # or: qvm-bridge.service creates it
+  sudo usermod -aG qvm "$USER"      # then log in again
 #+end_src
 
-- Create the =qvm0= bridge on the host, with address =10.42.01/42=
-  All virtual machines will plug into that bridge.
-#+begin_src sh :tangle setup.sh
-  qvm-bridge up
+This installs:
+| What                                      | Where                                              |
+|-------------------------------------------+----------------------------------------------------|
+| Helper scripts                            | =/opt/qvm/bin=                                     |
+| dnsmasq and nftables configuration        | =/etc/opt/qvm=                                     |
+| systemd units (linked with =systemctl=)   | =/etc/opt/qvm/systemd=                             |
+| Bridge definition (=BRIDGE=nm=)           | =/etc/NetworkManager/system-connections/qvm0.nmconnection= |
+
+To use the helpers from this checkout instead, =source env.sh=.
+
+* Network
+Bring up the =qvm0= bridge (=10.42.0.1/24=).
+NAT to the internet and =dnsmasq= serving DHCP and DNS for the =qvm0.lan= domain
+start and stop with it:
+#+begin_src sh
+  nmcli connection up qvm0                  # BRIDGE=nm (down to stop)
+  sudo systemctl start qvm-bridge.service   # BRIDGE=script (stop to stop)
   # Inspect
   ip addr show qvm0
-#+end_src
-
-- Setup host firewall rules that make the internet reachable from the bridge.
-  Enable host DNS resolution, assigning the  =qvm0.lan= domain to the bridge.
-#+begin_src sh :tangle setup.sh
-  qvm-setup-host
-  qvm-dns up
-  # Inspect
   resolvectl status qvm0
-  journalctl -b SYSLOG_IDENTIFIER=dnsmasq
+  journalctl -b -u qvm-dns.service
 #+end_src
 
-- Start virtual machines.
-  Assuming existing disks =${QVM_DIR}/machines/{cp,wk1,wk2}.qcow2=:
-#+begin_src sh :tangle
-  for vm in cp wk1 wk2; do
-    qvm-run -d "${vm}"
-  done
-#+end_src
-
-- The VM serial port and QEMU monitor will be multiplexed on a pty mentioned in the output of =qvm-run=.
-  To get a console from the host:
-#+begin_src
-  foot --pty dev/pts/3
-#+end_src
-
-
-- Alternatively, SSH to the VMs from the host.
-  Aassuming the SSH public key was authorized on the guest by cloud-init:
+* Creating virtual machines
+- Add =qcow2= images that serve as VM templates to =/var/opt/qvm/templates=:
 #+begin_src sh
-  ssh -i "${QVM_DIR}/ssh/id_ed25519" root@cp.qvm0.lan
+  cp ~/Downloads/rhel-10.0-x86_64-kvm.qcow2 /var/opt/qvm/templates
 #+end_src
 
-
-- To stop a VM
+- Create a VM disk named =node=, as an overlay of a template:
 #+begin_src sh
-  kill "$(cat "${QVM_DIR}/run/${vm}.pid")"
+  qvm-create -b rhel-10.0-x86_64-kvm -s 20G node
 #+end_src
 
-** Creating virtual machines
-
-- Add =qcow2= images that should serve as VM templates in the =QVM_DIR/templates= directory.
+- Optionally, build a =cloud-init= seed for the VM from =~/.config/qvm/user-data/node.yaml=
+  (see [[file:config/user-data/rhel.example.yaml]]):
 #+begin_src sh
-  cp ~/Downloads/rhel-10.0-x86_64-kvm.qcow2 "${QVM_DIR}/templates"
+  qvm-localds node
 #+end_src
 
-- Create a VM disk image named =node=, using a template as base image
+- Optionally, set VM parameters in =~/.config/qvm/machines/node=:
 #+begin_src sh
-  qvm-create -b rhel-10.0-x86_64-kvm.qcow2 -s 20G node
+  smp=2       # CPUs (default: 4)
+  m=4G        # memory (default: 8G)
+  cdrom=rhel-10.0-x86_64-dvd   # ISO in /var/opt/qvm/iso
+  # mac=52:54:00:12:34:56      # default: derived from the VM name
 #+end_src
 
-- Optionally, create a =cloud-init= seed for the VM,
-  using a provided =user-data= (default: =scripts/user-data/cloud.yaml=)
+* Running virtual machines
 #+begin_src sh
-  qvm-localds -u /path/to/user-data.yaml node
+  qvm-run node          # foreground
+  qvm-run -d node       # in the background
+  qvm-run -n node       # dry run: print the qemu command line
 #+end_src
 
-- Run the VM with cloud-init seed mounted using the =-i= flag
-#+begin_src
-  qvm-run -i node
+The VM serial console and QEMU monitor are multiplexed on a pty mentioned in the output of =qvm-run=.
+To attach a terminal to it (=C-a c= switches between console and monitor):
+#+begin_src sh
+  foot --pty /dev/pts/3
 #+end_src
+
+Alternatively, SSH to the VM, assuming cloud-init authorized your key:
+#+begin_src sh
+  ssh -i ~/.config/qvm/ssh/id_ed25519 root@node.qvm0.lan
+#+end_src
+
+To stop a VM started in the background:
+#+begin_src sh
+  kill "$(cat /var/opt/qvm/run/node.pid)"
+#+end_src
+
+* How it works
+See [[file:docs/net.org]] for the networking part.
