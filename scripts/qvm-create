@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -eu
 #+ Create an overlay VM from a base disk image.
-#+ Base images are searched in QVM_DIR/templates,
-#+ and VM disks created in QVM_DIR/machines.
+#+ Base images are searched in QVM_DATA_DIR/templates,
+#+ and VM disks created in QVM_DATA_DIR/machines.
 #+ Usage: SCRIPT [-n] [-b BASE_NAME] [-s SIZE] VM_NAME
 
 SCRIPT="$(basename "$0")"
@@ -17,8 +17,8 @@ dry_run=0
 #+ -s SIZE  VM disk size.
 #+          Example: 20G
 #+          Default: same as base image
-#+ -b BASE_NAME  Base disk image name, without extension.
-#+               Searched in QVM_DIR/templates
+#+ -b BASE_NAME  Base disk image name, with or without .qcow2 extension.
+#+               Searched in QVM_DATA_DIR/templates
 base_disk_name=default
 
 while getopts b:s:nh opt; do
@@ -42,20 +42,21 @@ shift $((OPTIND - 1))
 vm_name="${1:-}"
 [[ -n "${vm_name}" ]] || errexit "required: VM_NAME"
 
-vm_disk_file="${QVM_DIR}/machines/${vm_name}.qcow2"
+MACHINES_DIR="${QVM_DATA_DIR}/machines"
+vm_disk_file="${MACHINES_DIR}/${vm_name}.qcow2"
 
 if [[ -f "${base_disk_name}" ]]; then
   base_disk_file="${base_disk_name}"
 else
-  printf -v base_disk_file '%s/%s.qcow2' "${QVM_DIR}/templates" "${base_disk_name}"
+  printf -v base_disk_file '%s/%s.qcow2' "${QVM_DATA_DIR}/templates" "${base_disk_name%.qcow2}"
 fi
 
-[[ -n "${base_disk_file}" ]] || errexit "no such file: ${base_disk_file}"
+[[ -f "${base_disk_file}" ]] || errexit "no such file: ${base_disk_file}"
 
 args=(
   create
   -f qcow2
-  -b "$(realpath --relative-to "${QVM_DIR}/machines" "${base_disk_file}")"
+  -b "$(realpath --relative-to "${MACHINES_DIR}" "${base_disk_file}")"
   -F qcow2
   "${vm_disk_file}"
 )
