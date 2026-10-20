@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-#+ Build cloud-init local datasource for VM
-#+ The cloud config file must be named VM and placed in QVM_CONFIG_DIR/user-data
-#+ Occurences of ${QVM_HOST} in the cloud config are replace by VM.
+#+ Build the cloud-init local datasource (NoCloud seed) for VM:
+#+ a directory QVM_DATA_DIR/localds/VM holding user-data and meta-data files,
+#+ that qvm-run presents to the VM as a VFAT disk labelled CIDATA.
+#+ The cloud config file must be named VM.yaml and placed in QVM_CONFIG_DIR/user-data
+#+ Occurrences of ${QVM_HOST} in the cloud config are replaced by VM.
 #+ Usage: SCRIPT [-h] VM
 set -eu
 SCRIPT="$(basename "$0")"
@@ -24,28 +26,17 @@ shift $((OPTIND - 1))
 [[ -n "${1:-}" ]] || usage
 
 vm="${1}"
-printf -v user_data '%s/%s' "${USERDATA_DIR}" "${vm}"
+printf -v user_data '%s/%s.yaml' "${USERDATA_DIR}" "${vm}"
 [[ -f "${user_data}" ]] || errexit "no such file: ${user_data}"
 
-mnt_point="$(mktemp -d /tmp/qvm-localds-XXXX)"
-on_exit() {
-  sudo umount "${mnt_point}" || true
-}
-
-trap on_exit EXIT
-
-create_img() {
-  truncate --size 256K "${img}"
-  mkfs.vfat -n CIDATA "${img}"
-  sudo mount -t vfat "${img}" "${mnt_point}"
-  QVM_HOST="${vm}" envsubst <"${user_data}" |
-    sudo tee "${mnt_point}/user-data" >/dev/null
-  cat <<EOF | sudo tee "${mnt_point}/meta-data" >/dev/null
+seed_dir="${LOCALDS_DIR}/${vm}"
+mkdir -p "${seed_dir}"
+# Substitute only QVM_HOST: other $VARIABLES (e.g. in runcmd) are for the guest
+# shellcheck disable=SC2016
+QVM_HOST="${vm}" envsubst '${QVM_HOST}' <"${user_data}" >"${seed_dir}/user-data"
+# A new instance-id makes cloud-init treat the next boot as a first boot
+cat >"${seed_dir}/meta-data" <<EOF
 instance-id: qvm-${vm}-${RANDOM}
 local-hostname: ${vm}
 EOF
-}
-
-printf -v img "%s/%s.img" "${LOCALDS_DIR}" "${vm}"
-create_img || errexit "Unable to create image: ${img}"
-info "Created datasource: ${img}"
+info "Created datasource: ${seed_dir}"
