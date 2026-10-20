@@ -1,20 +1,15 @@
 [Unit]
 Description=Start dnsmasq server on interface qvm0
-PartOf=qvm-network.service
-Requires=qvm-bridge.service
-After=qvm-bridge.service
+# udev exposes every network interface as a device unit, whoever creates it
+# (NetworkManager, qvm-bridge.service, `ip link add`...):
+# start once qvm0 exists, stop when it disappears.
+BindsTo=sys-subsystem-net-devices-qvm0.device
+After=sys-subsystem-net-devices-qvm0.device
 
 [Service]
 Type=exec
 ExecStart=dnsmasq --keep-in-foreground --conf-file=/etc/opt/qvm/dnsmasq.conf
-# TODO: Use configuration file!
-ExecStartPost=resolvectl dns qvm0 10.42.0.1
-ExecStartPost=resolvectl domain qvm0 qvm0.lan ~qvm.lan
-ExecStartPost=resolvectl default-route qvm0 no
-ExecStartPost=resolvectl llmnr qvm0 no
-ExecStartPost=resolvectl dnssec qvm0 no
-ExecStartPost=resolvectl status qvm0
-ExecStopPost=resolvectl dns qvm0 ""
 
 [Install]
-WantedBy=qvm-network.target
+# Start whenever qvm0 appears
+WantedBy=sys-subsystem-net-devices-qvm0.device
