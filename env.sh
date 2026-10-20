@@ -1,10 +1,7 @@
-# Adjust depending on your setup
-qvm_dir=var/vms
-# Toolbox container
-if [[ -f /run/.containerenv ]] && [[ -d /run/host ]]; then
-  fs_root=/run/host
-fi
-QVM_DIR="${fs_root:-}/${qvm_dir}"
+# Source from the repository root to run the helpers from this checkout
+# instead of the installed copies in /opt/qvm/bin.
 PATH="$(pwd)/scripts:${PATH}"
-KUBECONFIG="${QVM_DIR}/kubeconfigs/admin.yaml:${QVM_DIR}/rke2.yaml"
-export PATH QVM_DIR KUBECONFIG
+# Defaults, override as needed:
+# QVM_DATA_DIR=/var/opt/qvm          # disks, base images, cloud-init seeds
+# QVM_CONFIG_DIR=~/.config/qvm       # machines/VM, user-data/VM.yaml
+export PATH
