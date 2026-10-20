@@ -8,10 +8,11 @@ table inet qvm0 {
 	elements = { "qvm0" }
     }
 
-    # For monitoring/debugging
     chain FORWARD {
         type filter hook forward priority 0; policy accept;
-        counter packets 0 bytes 0
+        # IPv4 forwarding is on host-wide: VMs may open connections out,
+        # but nobody may open connections in, e.g. a LAN host routing through this one.
+        oifname "qvm0" iifname != "qvm0" ct state new counter drop
     }
 
     chain POSTROUTING {
