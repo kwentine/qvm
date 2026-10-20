@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #+ Boot a VM from a disk image in QVM_DATA_DIR/machines.
-#+ If found in QVM_DATA_DIR/localds, a cloud-init local data source is added.
+#+ If QVM_DATA_DIR/localds/VM exists (see qvm-localds), it is attached as cloud-init data source.
 #+ Optional settings (smp, m, mac, cdrom) are sourced from QVM_CONFIG_DIR/machines/VM.
 #+ Usage: SCRIPT [-n] [-u] [-d] VM
 set -eu
@@ -76,10 +76,11 @@ if [[ -n "${cdrom:-}" ]]; then
   )
 fi
 
-# Add cloud-init local data source
-printf -v localds "%s/%s.img" "${LOCALDS_DIR}" "${vm}"
-if [[ -f "${localds}" ]]; then
-  args+=(-drive "file=${localds},if=virtio,format=raw")
+# Add cloud-init local data source.
+# QEMU's vvfat driver presents the directory to the VM as a VFAT disk
+localds="${LOCALDS_DIR}/${vm}"
+if [[ -d "${localds}" ]]; then
+  args+=(-drive "if=virtio,format=raw,read-only=on,file.driver=vvfat,file.dir=${localds},file.label=CIDATA")
 fi
 
 if ((user_net)); then
