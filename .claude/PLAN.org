@@ -132,7 +132,7 @@ Status 2026-10-18: mostly done, see [[file:TODO.org::#phase-0][TODO.org #phase-0
 - =qvm-dns.service=: drop the =resolvectl= lines (NM does it), =dhcp-leasefile= under =StateDirectory=,
   =bind-dynamic= instead of =bind-interfaces= (tolerates qvm0 appearing after dnsmasq).
 - =qvm-nat.service=: =nftables.service= coupling, sysctl drop-in (see Host facts).
-- =qvm-network.target= =WantedBy=multi-user.target=; =/etc/qemu/bridge.conf= gets =allow qvm0=; =groupadd qvm=.
+- units follow the =qvm0= device, bridge up by hand; =/etc/qemu/bridge.conf= gets =allow qvm0=; =groupadd qvm=.
 - Makefile, keeping the =/opt= + link layout: =DESTDIR= on every path, =install -Dm=, =uninstall=,
   link/enable only when =DESTDIR= is empty (already done for units), *no =$HOME= in the sudo targets*:
   - =sudo make install= : =/opt/qvm=, =/etc/opt/qvm=, =/var/opt/qvm=, link + enable system units

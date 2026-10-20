@@ -54,16 +54,13 @@ All rows of the first table, plus:
 
 ** Migrating your host
 The old Makefile enabled *every* unit, including =qvm-bridge.service= and =qvm-machine-r0.service=.
-Left enabled, =qvm-bridge.service= would delete NM's =qvm0= on stop. So:
+=make uninstall= now also stops, disables and removes those leftovers and =qvm-network.target=. So:
 #+begin_src sh
-  sudo systemctl stop qvm-network.target
-  sudo systemctl disable qvm-bridge.service qvm-machine-r0.service   # old leftovers
   sudo make uninstall && sudo make install
   sudo usermod -aG qvm "$USER"            # log in again
-  # move your data from /var/vms to /var/opt/qvm/{templates,machines,localds,iso}
-  # move user-data files to ~/.config/qvm/user-data/VM.yaml, machine configs to ~/.config/qvm/machines/VM
-  sudo systemctl start qvm-network.target
+  nmcli connection up qvm0                # dnsmasq and NAT follow
 #+end_src
+Your own =systemd/qvm-machine-r0.service= still refers to =qvm-network.target=: left as is, Phase 3 replaces it.
 
 ** Original table
 The following can be a starting point:
@@ -85,7 +82,7 @@ For the following I need some additional context and proposed fixes, that you ca
 I extendend the DHCP range, no reason to have it only 11.
 I like the idea of deriving the MAC from the name. How would you go about it?
 Ultimately, we should also allow the MAC to be configured in the TOML file.
-- *Answer* (implemented in [[file:../scripts/qvm-run]]): =52:54:00= + the first 3 bytes of =sha256(VM name)=.
+- [X] *Answer* (implemented in [[file:../scripts/qvm-run]]): =52:54:00= + the first 3 bytes of =sha256(VM name)=.
   #+begin_src sh
     hash="$(printf '%s' "${vm}" | sha256sum)"
     mac="52:54:00:${hash:0:2}:${hash:2:2}:${hash:4:2}"
@@ -119,7 +116,12 @@ You can go ahead and fix the `.yaml` inconsistency.
   - Caveats: vvfat is "experimental" in read-write mode (we use read-only); RHEL builds of qemu disable it (your host is Fedora).
   - =qvm-localds= shrinks to =envsubst= + =cat >meta-data=.
   - Fallback if vvfat ever disappoints: =mcopy= from mtools writes into a vfat image without mounting.
-  - [ ] Go ahead with vvfat?
+  - [X] Go ahead with vvfat?
+  - *Done*: [[file:../scripts/qvm-localds]] writes =localds/VM/{user-data,meta-data}=, [[file:../scripts/qvm-run]] attaches the directory.
+    Bonus fix: =envsubst '${QVM_HOST}'= now substitutes only that variable (before, a =$HOME= in a =runcmd= got the /host's/ value).
+    *Verified end to end*: Debian 13 cloud image, seed from =qvm-localds=, drive line from =qvm-run -n=, booted under TCG:
+    =Datasource DataSourceNoCloud [seed=/dev/vdb1]=, hostname set from =${QVM_HOST}=. Rerun: [[file:../scratch/test-vvfat-seed.sh]].
+    Migration: delete old =localds/*.img=, re-run =qvm-localds= only for VMs you want re-initialised (new instance-id → first boot again).
 
 | [[file:../config/dnsmasq.conf]]                 | no =dhcp-leasefile= → shares =/var/lib/dnsmasq/dnsmasq.leases= with any other dnsmasq                      |
 Not a problem in my case, I only use dnsmasq for this purpose.
@@ -144,10 +146,116 @@ What are our alternatives? Just not turning it off afterwards?
 - *Side effect to know*: with forwarding on and no forward filtering, a machine on your LAN that uses your laptop as gateway
   could reach the VMs. Cheap hardening in =qvm0.nft=: in =FORWARD=, drop new connections /into/ =qvm0= that do not come from =qvm0=.
 - Also pending here: tie =qvm-nat.service= to =nftables.service=, whose reload flushes the =qvm0= table (see PLAN.org Host facts).
-  - [ ] OK for option 1 + hardening + nftables coupling?
+  - [X] OK for option 1 + hardening + nftables coupling?
 
-** TODO Can you explain BindsTo ?                                  :question:
+Please provide some more explanations about the "tying" with ntables.service, and an example showing why it is useful.
+
+The NFT configuration on my host loaded by nftables.service has:
+#+begin_example
+table inet kwentine {
+	set allowed_interfaces {
+		type ifname
+		elements = { "lo",
+			     "qvm0" }
+	}
+
+	chain INPUT {
+		type filter hook input priority filter; policy drop;
+		ct state established,related accept
+		iifname @allowed_interfaces accept
+	}
+}
+#+end_example
+
+I believe this makes toggling ip forwarding safe.
+
+*Done*: [[file:../config/90-qvm.conf]] (sysctl, installed by make), forward rule in [[file:../config/qvm0.nft]],
+coupling in [[file:../systemd/qvm-nat.service]]. Not runnable in my container (no netlink): see the demo below.
+
+** Your INPUT chain does not cover forwarding
+Packets get one of two paths through netfilter:
+#+begin_example
+  for the host itself:   prerouting → INPUT   → (local process)
+  for someone else:      prerouting → FORWARD → postrouting
+#+end_example
+A packet from your LAN to a VM is /for someone else/: it never meets your =INPUT= chain.
+Before today, the only =forward= chain was qvm0's, with =policy accept=. Example, from another machine on your wifi:
+#+begin_src sh
+  sudo ip route add 10.42.0.0/24 via <your laptop's LAN IP>
+  ssh root@10.42.0.12      # reaches the VM: your INPUT drop policy is never consulted
+#+end_src
+Now covered by the =FORWARD= rule: =oifname "qvm0" iifname != "qvm0" ct state new drop=
+(replies to connections the VMs opened are =established=, so they pass).
+Your =INPUT= chain still matters, differently: allowing =qvm0= is what lets VMs reach dnsmasq (DHCP, DNS) on the host.
+
+** Q: add the INPUT rule to the qvm0 table, to make it self-contained?
+Not possible, and it is one of nftables' key rules ([[https://wiki.nftables.org/wiki-nftables/index.php/Configuring_chains][wiki: Configuring chains]]):
+*a packet goes through every base chain on a hook, in priority order. =drop= is final, =accept= only ends the current chain.*
+#+begin_example
+  input hook:  inet kwentine INPUT (policy drop)  →  inet qvm0 INPUT (accept from qvm0)
+               a DHCP request from a VM is dropped by the first chain; the second never sees it.
+#+end_example
+So an =accept= in our table cannot override your =drop=: the allowance must be in /your/ ruleset, as it is today.
+Conversely, our =FORWARD= =drop= works whatever other tables say: that is why the hardening could live in =qvm0.nft=.
+What we can do instead:
+- Document it: "if your firewall drops input by default, allow DHCP and DNS from =qvm0=" (README, Phase 5).
+- Narrow your rule, if you like: VMs only /need/ dnsmasq on the host:
+  #+begin_src
+    iifname "qvm0" udp dport { 53, 67 } accept
+    iifname "qvm0" tcp dport 53 accept
+  #+end_src
+  Today =qvm0= in =allowed_interfaces= lets VMs reach every service on the host. Fine for a lab, your call.
+
+** Tying =qvm-nat.service= to =nftables.service=
+- *Problem*: Fedora's =nftables.service= runs =nft flush ruleset= on stop, and =flush ruleset; include …= on reload.
+  "ruleset" means /every/ table, =inet qvm0= included. Typical trigger: you edit your =kwentine= table,
+  =systemctl reload nftables=, and the VMs silently lose internet, while =qvm-nat.service= still says =active (exited)=.
+- *Fix*, three directives in =[Unit]=:
+  | Directive                               | Effect                                                            |
+  |-----------------------------------------+-------------------------------------------------------------------|
+  | =PartOf=nftables.service=               | stop/restart of nftables → stop/restart of qvm-nat               |
+  | =ReloadPropagatedFrom=nftables.service= | reload of nftables → reload of qvm-nat (=ExecReload= loads the table again) |
+  | =After=nftables.service=                | our table is loaded /after/ the flush, not before                 |
+  On a host without =nftables.service=, they refer to a unit that never runs: no effect.
+- *Demo*: [[file:../scratch/demo-nftables-coupling.sh]] (on your host, after install).
+
+* TODO Can you explain BindsTo ?                                   :question:
+:PROPERTIES:
+:CUSTOM_ID: bindsto
+:END:
 The following is unclear to me:
 
 - =qvm-dns.service= now =BindsTo= the =qvm0= device unit (=sys-subsystem-net-devices-qvm0.device=),
   so it works whoever creates the bridge. dnsmasq uses =bind-dynamic= for the same reason.
+
+** Answer
+- *Device units*: systemd tracks devices as units too. A udev rule (=99-systemd.rules=) tags every network interface,
+  so when /anything/ creates =qvm0= (NetworkManager, =qvm-bridge=, a manual =ip link add=),
+  =sys-subsystem-net-devices-qvm0.device= becomes active; when the interface disappears, it becomes inactive.
+- *What dnsmasq needs is the interface, not its creator.* Before: =Requires=qvm-bridge.service=,
+  which with NetworkManager would pull in the script bridge as well. The device unit is the common denominator.
+- *The three dependency strengths*:
+  | Directive   | Starting qvm-dns...         | If the device vanishes on its own (=nmcli con down=) |
+  |-------------+-----------------------------+------------------------------------------------------|
+  | =Wants==    | tries to start the device   | dnsmasq keeps running, serving a dead interface      |
+  | =Requires== | needs it                    | same: Requires reacts to /stop jobs/, not to vanishing |
+  | =BindsTo==  | needs it                    | *dnsmasq is stopped*                                 |
+  =After== is separate: ordering only. With it, dnsmasq starts once =qvm0= exists, waiting up to 90 s for it.
+- *=bind-dynamic=* covers the next gap: =qvm0= may exist before NetworkManager has given it =10.42.0.1=.
+  =bind-interfaces= binds only the addresses present at startup (DHCP/DNS silently not served);
+  =bind-dynamic= also binds addresses that appear later.
+- *Not covered*: when =qvm0= comes back, dnsmasq does not restart by itself.
+  Option: =WantedBy=sys-subsystem-net-devices-qvm0.device= in =[Install]= → dnsmasq starts whenever =qvm0= appears,
+  including at boot since the NM profile autoconnects. Then =qvm-network.target= mostly matters for =qvm-nat=.
+  - [X] Want that? → "No bridge at boot, only when I manually enable the connection."
+- *Done* (2026-10-18): the bridge is the on/off switch.
+  - Keyfile: =autoconnect=false=. =nmcli connection up qvm0= (no sudo in a desktop session) / =down=.
+  - =qvm-dns= and =qvm-nat=: =WantedBy== and =BindsTo== the device → start when =qvm0= appears, stop when it goes.
+    =systemctl enable= creates =/etc/systemd/system/sys-subsystem-net-devices-qvm0.device.wants/=.
+  - =qvm-network.target= removed: the device unit plays its role ("the network is up").
+  - =BRIDGE=script=: =sudo systemctl start qvm-bridge.service= (linked, not enabled: never at boot).
+  - Caveat: =PartOf=nftables.service= propagates as /try-restart/, so a firewall restart while the bridge is down
+    does not start =qvm-nat= (which would wait 90 s for a missing =qvm0=).
+  - To check on your host: that =nmcli connection down qvm0= really deletes the bridge (it should, NM created it);
+    [[file:../scratch/demo-bindsto.sh]] shows it.
+- *Demo*: [[file:../scratch/demo-bindsto.sh]] (on your host, after install).

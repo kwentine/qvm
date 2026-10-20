@@ -27,3 +27,23 @@
 - Pending user decisions (TODO.org #phase-0): vvfat seeds (tested OK with qemu-img/qemu 10.2),
   ip_forward never-off + forward hardening + nftables.service coupling.
 - Host migration steps listed in TODO.org.
+** 2026-10-18 — Phase 0, round 2 (uncommitted)
+- User committed: MAC derivation, example rename, =.claude/= files.
+- vvfat seeds: =qvm-localds= writes =localds/VM/{user-data,meta-data}=, =qvm-run= attaches the dir as VFAT =CIDATA=.
+  =envsubst= limited to =${QVM_HOST}=.
+- ip_forward on for good via =config/90-qvm.conf= (=/etc/sysctl.d=); FORWARD rule drops new connections into qvm0.
+- =qvm-nat.service= follows =nftables.service= (PartOf, ReloadPropagatedFrom, After); ExecStop uses =nft destroy=.
+- Answers in TODO.org (#phase-0: INPUT vs FORWARD, nftables tying; #bindsto). Demos: =scratch/demo-*.sh=.
+- Open: auto-start dnsmasq when qvm0 appears (=WantedBy= the device unit)?
+** 2026-10-18 — Bridge as on/off switch
+- NM keyfile =autoconnect=false=; =nmcli connection up qvm0= starts everything.
+- =qvm-dns=/=qvm-nat= WantedBy + BindsTo =sys-subsystem-net-devices-qvm0.device=; =qvm-network.target= removed;
+  =qvm-bridge.service= linked only (BRIDGE=script). Makefile uninstall cleans legacy units.
+- INPUT allowance cannot live in the qvm0 table (accept is not final across base chains): stays in user's ruleset.
+** Next session
+- User commits round 2 and migrates the host (=make uninstall && make install=, data to =/var/opt/qvm=).
+- Ask for feedback from the host: =scratch/demo-bindsto.sh=, =scratch/demo-nftables-coupling.sh=
+  (untested here: no netlink in the container), =nmcli connection down= deleting the bridge.
+- Then: close Phase 0 in TODO.org, start Phase 2 (Python =qvm= CLI, TOML machine config incl. =mac=).
+- Container tooling to suggest for the default env: uv (missing), ShellCheck, shfmt, qemu-img,
+  qemu-system-x86-core, dnsmasq, nftables, gettext-envsubst.
