@@ -97,7 +97,7 @@ post-install:
 	systemctl enable $(addprefix $(unitdir)/,$(SERVICES))
 ifeq ($(BRIDGE),nm)
 	nmcli connection reload
-	@echo "Start the network: nmcli connection up qvm0"
+	@echo "To start the network: nmcli connection up qvm0"
 else
 	@echo "Start the network: sudo systemctl start qvm-bridge.service"
 endif
