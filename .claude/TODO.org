@@ -10,7 +10,7 @@
 - Key idea: split *host side* (root, declarative config files) from *machine side*
   (unprivileged =qvm= CLI + =systemd --user= template units).
 
-* DONE Answer open questions blocking Phase 0/1                 :question:
+* DONE Answer open questions blocking Phase 0/1                    :question:
 See [[file:PLAN.org::*Open questions for you][PLAN.org: Open questions]] (bridge owner, Python, firewalld/toolbox, disk location).
 - [X] Scope: experiments are lumber
 - [X] Prefix: keep =/opt= + =systemctl link=
@@ -40,7 +40,7 @@ and a fallback for systems that may not have NetworkManager.
 :CUSTOM_ID: phase-0
 :END:
 
-** Done (uncommitted, see =git status=)
+** DONE (uncommitted, see =git status=)
 All rows of the first table, plus:
 - =QVM_CONFIG_DIR= now defaults to =~/.config/qvm= (per CLAUDE.md), =QVM_DIR= is gone: one =QVM_DATA_DIR=/var/opt/qvm=.
 - =qvm-create -b= accepts names with or without =.qcow2= (the README used the extension, the script appended it again).
@@ -52,7 +52,7 @@ All rows of the first table, plus:
   Tested: staged install, =make -n= of the live steps.
 - shellcheck clean, shfmt applied, =dnsmasq --test= OK.
 
-** Migrating your host
+** TODO Migrating your host
 The old Makefile enabled *every* unit, including =qvm-bridge.service= and =qvm-machine-r0.service=.
 =make uninstall= now also stops, disables and removes those leftovers and =qvm-network.target=. So:
 #+begin_src sh
