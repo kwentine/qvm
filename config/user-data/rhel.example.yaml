@@ -1,30 +1,22 @@
 #cloud-config
-host: ${QVM_HOST}
-disable_root: False
-ssh_pwauth: True
-ssh_authorized_keys:
-  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFWxleK9RNC9lxZotL95FttjZkgwrlc5TUawbDsyZRx4 kwentine@localhost"
-chpasswd:
-  expire: False
-  users:
-    - name: root
-      password: racine
-      type: text
-    - name: cloud-user
-      password: nuage
-      type: text
+# Example user-data for a RHEL VM, with packages served from the installation DVD
+# (attached with `cdrom=` in the machine config), so no registration is needed.
+#
+# Copy to ~/.config/qvm/user-data/VM.yaml and adapt.
+# qvm-localds replaces ${QVM_HOST} with the VM name.
+hostname: ${QVM_HOST}
+disable_root: false
+ssh_pwauth: false
 users:
   - default
   - name: root
-    lock_passwd: False
-    ssh_authorized_keys: ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFWxleK9RNC9lxZotL95FttjZkgwrlc5TUawbDsyZRx4 kwentine@localhost"]
-    shell: /bin/bash
+    ssh_authorized_keys:
+      # Public key of ~/.config/qvm/ssh/id_ed25519
+      - "ssh-ed25519 AAAA... you@host"
 mounts:
   - [/dev/cdrom, /mnt/dvd, "iso9660", "ro,defaults,nofail", "0", "0"]
 write_files:
-  - path: /etc/vconsole.conf
-    content: |
-      KEYMAP=se
+  # Silence subscription-manager: repositories come from the DVD
   - path: /etc/dnf/plugins/subscription-manager.conf
     permissions: "0644"
     content: |
@@ -36,10 +28,6 @@ write_files:
     content: |
       [rhsm]
       manage_repos = 0
-  - path: /etc/NetworkManager/conf.d/rke2-canal.conf
-    content: |
-      [keyfile]
-      unmanaged-devices=interface-name:flannel*;interface-name:cali*;interface-name:tunl*;interface-name:vxlan.calico;interface-name:vxlan-v6.calico;interface-name:wireguard.cali;interface-name:wg-v6.cali;interface-name:lxc*,interface-name:cilium*
 yum_repos:
   BaseOS:
     name: RHEL DVD BaseOS
@@ -51,12 +39,3 @@ yum_repos:
     baseurl: file:///mnt/dvd/AppStream
     enabled: true
     gpgkey: file:///mnt/dvd/RPM-GPG-KEY-redhat-release
-  rke2common:
-    name: Rancher RKE2 common
-    baseurl: https://rpm.rancher.io/rke2/latest/common/centos/10/noarch
-    enabled: true
-    gpgkey: https://rpm.rancher.io/public.key
-packages:
-  - rke2-selinux
-runcmd:
-  - sed -i /pam_motd/d /etc/pam.d/sshd
