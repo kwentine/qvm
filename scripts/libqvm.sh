@@ -1,4 +1,5 @@
-#!/bin/env bash
+# shellcheck shell=bash
+# Sourced by the qvm-* helpers.
 declare -i dry_run=0
 
 usage() {
@@ -28,6 +29,7 @@ run() {
   "$@"
 }
 
-: "${QVM_DIR:=/opt/qvm}"
 : "${QVM_DATA_DIR:=/var/opt/qvm}"
-: "${QVM_CONFIG_DIR:=/etc/opt/qvm}"
+# Per-user configuration (machines, user-data).
+# HOME may be unset in system services (qvm-bridge.service), which do not use it.
+: "${QVM_CONFIG_DIR:=${XDG_CONFIG_HOME:-${HOME:-}/.config}/qvm}"
