@@ -61,7 +61,8 @@ The old Makefile enabled *every* unit, including =qvm-bridge.service= and =qvm-m
   nmcli connection up qvm0                # dnsmasq and NAT follow
 #+end_src
 Your own =systemd/qvm-machine-r0.service= still refers to =qvm-network.target=: left as is, Phase 3 replaces it.
-
+*** DONE Run make uninstall
+*** TODO Run make install
 ** Original table
 The following can be a starting point:
 | Where                                       | Problem                                                                                                    |
@@ -172,7 +173,7 @@ I believe this makes toggling ip forwarding safe.
 *Done*: [[file:../config/90-qvm.conf]] (sysctl, installed by make), forward rule in [[file:../config/qvm0.nft]],
 coupling in [[file:../systemd/qvm-nat.service]]. Not runnable in my container (no netlink): see the demo below.
 
-** Your INPUT chain does not cover forwarding
+** DONE Your INPUT chain does not cover forwarding
 Packets get one of two paths through netfilter:
 #+begin_example
   for the host itself:   prerouting → INPUT   → (local process)
@@ -188,7 +189,7 @@ Now covered by the =FORWARD= rule: =oifname "qvm0" iifname != "qvm0" ct state ne
 (replies to connections the VMs opened are =established=, so they pass).
 Your =INPUT= chain still matters, differently: allowing =qvm0= is what lets VMs reach dnsmasq (DHCP, DNS) on the host.
 
-** Q: add the INPUT rule to the qvm0 table, to make it self-contained?
+** DONE Q: add the INPUT rule to the qvm0 table, to make it self-contained?
 Not possible, and it is one of nftables' key rules ([[https://wiki.nftables.org/wiki-nftables/index.php/Configuring_chains][wiki: Configuring chains]]):
 *a packet goes through every base chain on a hook, in priority order. =drop= is final, =accept= only ends the current chain.*
 #+begin_example
@@ -219,7 +220,7 @@ What we can do instead:
   On a host without =nftables.service=, they refer to a unit that never runs: no effect.
 - *Demo*: [[file:../scratch/demo-nftables-coupling.sh]] (on your host, after install).
 
-* TODO Can you explain BindsTo ?                                   :question:
+* DONE Can you explain BindsTo ?                                   :question:
 :PROPERTIES:
 :CUSTOM_ID: bindsto
 :END:
@@ -259,3 +260,8 @@ The following is unclear to me:
   - To check on your host: that =nmcli connection down qvm0= really deletes the bridge (it should, NM created it);
     [[file:../scratch/demo-bindsto.sh]] shows it.
 - *Demo*: [[file:../scratch/demo-bindsto.sh]] (on your host, after install).
+
+* TODO I am uncomfortable with install enabling ip_forward         :question:
+How do other tools like Docker handle this?
+Is installing docker equivalent to turning ip_forward on persistently?
+* TODO Can you explain -m 2775 (setgid)                            :question:
