@@ -4,7 +4,6 @@
 #
 # Copy to ~/.config/qvm/user-data/VM.yaml and adapt.
 # qvm-localds replaces ${QVM_HOST} with the VM name.
-hostname: ${QVM_HOST}
 disable_root: false
 ssh_pwauth: false
 users:

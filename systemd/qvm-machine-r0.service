@@ -1,8 +1,0 @@
-[Unit]
-Description=Start r0
-Wants=qvm-network.target
-After=qvm-network.target
-
-[Service]
-Type=exec
-ExecStart=/opt/qvm/bin/qvm-run r0

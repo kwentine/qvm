@@ -99,5 +99,17 @@ To stop a VM started in the background:
   kill "$(cat ~/.local/share/qvm/run/node.pid)"
 #+end_src
 
+** As systemd user services
+=make install-helpers= also installs a template unit, =qvm-machine@.service=, that runs =qvm-run NAME=:
+#+begin_src sh
+  systemctl --user start qvm-machine@node       # stop, status, enable (start at login)...
+  journalctl --user -u qvm-machine@node         # QEMU output, including the console pty
+#+end_src
+- Stopping the unit kills QEMU at once, like pulling the power plug:
+  shut the guest down from inside first when it matters (=ssh node poweroff=).
+- The user manager does not see your shell's environment: set =QVM_DATA_DIR= or =QVM_CONFIG_DIR=
+  in =~/.config/environment.d/qvm.conf= (takes effect at next login).
+- User services stop when you log out, unless you let them linger: =loginctl enable-linger=.
+
 * How it works
 See [[file:docs/net.org]] for the networking part.

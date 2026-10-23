@@ -4,7 +4,7 @@
 #   sudo make install
 #   sudo make uninstall
 #
-# Helper scripts into ~/.local/bin.
+# Helper scripts into ~/.local/bin, user unit qvm-machine@.service into ~/.local/share/systemd/user.
 #   make install-helpers
 #   make uninstall-helpers
 #
@@ -17,7 +17,9 @@ sysconfdir ?= /etc/opt/qvm
 unitdir ?= $(sysconfdir)/systemd
 nmconndir ?= /etc/NetworkManager/system-connections
 qemu_bridge_conf ?= /etc/qemu/bridge.conf
+# qvm-machine@.service runs %h/.local/bin/qvm-run: keep in sync
 userbindir ?= $(HOME)/.local/bin
+userunitdir ?= $(HOME)/.local/share/systemd/user
 
 INSTALL ?= install
 INSTALL_PROGRAM ?= $(INSTALL) -m 0755
@@ -27,6 +29,7 @@ PROGRAMS := qvm-create qvm-localds qvm-run
 LIBS := libqvm.sh
 CONFIG_FILES := dnsmasq.conf qvm0.nft
 UNITS := qvm-dns.service qvm-nat.service
+USER_UNITS := qvm-machine@.service
 
 .PHONY: install install-files install-config install-units install-bridge post-install uninstall \
 	install-helpers uninstall-helpers
@@ -50,8 +53,7 @@ install-bridge:
 post-install:
 # Let qemu-bridge-helper plug unprivileged VMs into qvm0
 	grep -qsx 'allow qvm0' $(qemu_bridge_conf) || echo 'allow qvm0' >>$(qemu_bridge_conf)
-# systemd does not search unitdir: link the units into /etc/systemd/system
-	systemctl enable $(addprefix $(unitdir)/,$(UNITS))
+	systemctl --quiet enable $(addprefix $(unitdir)/,$(UNITS))
 	nmcli connection reload
 	@echo "Start the network: nmcli connection up qvm0"
 	@echo "Install the helper scripts, without sudo: make install-helpers"
@@ -71,6 +73,11 @@ install-helpers:
 	$(INSTALL) -d $(DESTDIR)$(userbindir)
 	$(INSTALL_PROGRAM) $(addprefix scripts/,$(PROGRAMS)) $(DESTDIR)$(userbindir)
 	$(INSTALL_DATA) $(addprefix scripts/,$(LIBS)) $(DESTDIR)$(userbindir)
+	$(INSTALL) -d $(DESTDIR)$(userunitdir)
+	$(INSTALL_DATA) $(addprefix systemd/,$(USER_UNITS)) $(DESTDIR)$(userunitdir)
+	$(if $(DESTDIR),,systemctl --user daemon-reload)
 
 uninstall-helpers:
 	$(RM) $(addprefix $(DESTDIR)$(userbindir)/,$(PROGRAMS) $(LIBS))
+	$(RM) $(addprefix $(DESTDIR)$(userunitdir)/,$(USER_UNITS))
+	$(if $(DESTDIR),,systemctl --user daemon-reload)

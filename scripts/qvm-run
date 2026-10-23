@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 #+ Boot a VM from a disk image in QVM_DATA_DIR/machines.
-#+ If QVM_DATA_DIR/localds/VM exists (see qvm-localds), it is attached as cloud-init data source.
+#+
+#+ If QVM_DATA_DIR/localds/VM exists (see qvm-localds),
+#+ it is attached as cloud-init NoCloud data source.
+#+
 #+ Optional settings (smp, m, mac, cdrom) are sourced from QVM_CONFIG_DIR/machines/VM.
+#+
 #+ Usage: SCRIPT [-n] [-u] [-d] VM
 set -eu
 SCRIPT="$(basename "$0")"
@@ -88,6 +92,8 @@ if ((user_net)); then
   info "SSH host port: ${port}"
   args+=(-nic "user,model=virtio,hostfwd=tcp::${port}-:22")
 else
+  ((dry_run)) || [[ -e /sys/class/net/qvm0 ]] ||
+    errexit "Bridge qvm0 is down: nmcli connection up qvm0"
   if [[ -z "${mac:-}" ]]; then
     # Stable MAC derived from the VM name: same name, same DHCP lease, same IP.
     # 52:54:00 is the prefix QEMU uses for its own default MACs.

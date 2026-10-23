@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-#+ Build the cloud-init local datasource (NoCloud seed) for VM:
-#+ a directory QVM_DATA_DIR/localds/VM holding user-data and meta-data files,
-#+ that qvm-run presents to the VM as a VFAT disk labelled CIDATA.
-#+ The cloud config file must be named VM.yaml and placed in QVM_CONFIG_DIR/user-data
-#+ Occurrences of ${QVM_HOST} in the cloud config are replaced by VM.
+#+ Generate the cloud-init NoCloud datasource files for VM.
+#+
+#+ The template used is QVM_CONFIG_DIR/user-data/VM.yaml,
+#+ in which occurrences of ${QVM_HOST} are replaced by VM.
+#+
 #+ Usage: SCRIPT [-h] VM
 set -eu
 SCRIPT="$(basename "$0")"

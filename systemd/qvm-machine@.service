@@ -1,0 +1,16 @@
+# User unit running one VM: systemctl --user start qvm-machine@NAME
+# Installed by `make install-helpers`, next to the helpers in ~/.local/bin.
+#
+# If needed, set QVM_DATA_DIR and QVM_CONFIG_DIR in ~/.config/environment.d/qvm.conf.
+
+[Unit]
+Description=QVM virtual machine %i
+
+[Service]
+Type=exec
+ExecStart=%h/.local/bin/qvm-run %i
+# Stopping sends SIGTERM: QEMU exits at once, like pulling the power plug.
+# Shut the guest down from inside first (e.g. ssh NAME poweroff) when it matters.
+
+[Install]
+WantedBy=default.target
