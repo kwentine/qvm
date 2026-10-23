@@ -13,12 +13,12 @@
 | DNS and DHCP | =dnsmasq= listening on =qvm0=           |
 
 * The pieces
-| Piece                 | Provided by                                                              | systemd unit                                      |
-|-----------------------+--------------------------------------------------------------------------+---------------------------------------------------|
-| Bridge + DNS routing  | [[file:../config/qvm0.nmconnection][NetworkManager keyfile]], or [[file:../scripts/qvm-bridge][qvm-bridge]] + =resolvectl=                     | =nmcli connection up qvm0= / =qvm-bridge.service= |
-| NAT                   | [[file:../config/qvm0.nft][nftables table]] + [[file:../config/90-qvm.conf][ip_forward]]                                              | =qvm-nat.service=                                 |
-| DHCP and DNS          | [[file:../config/dnsmasq.conf][dnsmasq]]                                                                  | =qvm-dns.service=                                 |
-| Guest ports on bridge | =qemu-bridge-helper=, allowed by =allow qvm0= in =/etc/qemu/bridge.conf= | (per VM)                                          |
+| Piece                 | Provided by                                                              | systemd unit               |
+|-----------------------+--------------------------------------------------------------------------+----------------------------|
+| Bridge + DNS routing  | [[file:../config/qvm0.nmconnection][NetworkManager keyfile]] (or by hand: =ip= + =resolvectl=, [[*Bridge][below]])          | =nmcli connection up qvm0= |
+| NAT                   | [[file:../config/qvm0.nft][nftables table]] + =ip_forward=                                            | =qvm-nat.service=          |
+| DHCP and DNS          | [[file:../config/dnsmasq.conf][dnsmasq]]                                                                  | =qvm-dns.service=          |
+| Guest ports on bridge | =qemu-bridge-helper=, allowed by =allow qvm0= in =/etc/qemu/bridge.conf= | (per VM)                   |
 
 The bridge is the on/off switch.
 =udev= publishes every network interface as a systemd device unit,
@@ -31,14 +31,30 @@ and /bound to/ it (stop when =qvm0= disappears):
 
 ** Bridge
 A Linux bridge is a virtual switch.
-Done by hand, creating it boils down to (see [[file:../scripts/qvm-bridge]]):
+=make install= declares it in a NetworkManager keyfile, [[file:../config/qvm0.nmconnection]],
+annotated with the commands each setting replaces. Those commands are the manual way,
+also usable on a host without NetworkManager.
+
+Create the bridge:
 #+begin_src sh
-  ip link add name qvm0 type bridge
-  ip addr add 10.42.0.1/24 dev qvm0
-  ip link set dev qvm0 up
+  sudo ip link add name qvm0 type bridge
+  sudo ip addr add 10.42.0.1/24 dev qvm0
+  sudo ip link set dev qvm0 up
 #+end_src
-On a host managed by NetworkManager, the same is declared in a keyfile,
-which is annotated with the commands each setting replaces.
+Route DNS queries for the VM domains to =dnsmasq= on =qvm0=:
+#+begin_src sh
+  sudo resolvectl dns qvm0 10.42.0.1
+  sudo resolvectl domain qvm0 qvm0.lan '~qvm.lan'   # '~': routing only, not a search domain
+  sudo resolvectl default-route qvm0 no             # other queries do not go there
+  sudo resolvectl llmnr qvm0 no
+  sudo resolvectl dnssec qvm0 no
+#+end_src
+These per-link settings vanish with the interface.
+Since =qvm-dns.service= and =qvm-nat.service= follow the =qvm0= device, not NetworkManager,
+they start with this bridge too. To tear it down (address and DNS settings go with it):
+#+begin_src sh
+  sudo ip link delete qvm0
+#+end_src
 
 When a VM starts, =qemu-system-x86_64 -nic bridge,br=qvm0= runs the setuid =qemu-bridge-helper=,
 which creates a TAP device and plugs it into the bridge.
@@ -46,7 +62,8 @@ This is how an unprivileged user can attach VMs to a bridge created by root.
 
 ** Routing and NAT
 Guests use the host (=10.42.0.1=) as their gateway. For the host to pass their packets on:
-- IPv4 forwarding must be enabled: =net.ipv4.ip_forward = 1= in [[file:../config/90-qvm.conf][/etc/sysctl.d/90-qvm.conf]].
+- IPv4 forwarding must be enabled: =qvm-nat.service= sets =net.ipv4.ip_forward=1= when the bridge comes up,
+  and leaves it on (like Docker or libvirt: others may rely on it) until reboot.
   It is a host-wide switch, so the =FORWARD= chain lets VMs open connections out, but nobody open connections in.
 - Packets leaving through another interface are masqueraded (source NAT to the outgoing interface address,
   which is not known beforehand). See the =POSTROUTING= chain in [[file:../config/qvm0.nft]].

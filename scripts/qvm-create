@@ -56,7 +56,7 @@ fi
 args=(
   create
   -f qcow2
-  -b "$(realpath --relative-to "${MACHINES_DIR}" "${base_disk_file}")"
+  -b "$(realpath -m --relative-to "${MACHINES_DIR}" "${base_disk_file}")"
   -F qcow2
   "${vm_disk_file}"
 )
@@ -64,5 +64,6 @@ if [[ -n "${size:-}" ]]; then
   args+=("${size}")
 fi
 
+run mkdir -p "${MACHINES_DIR}"
 run qemu-img "${args[@]}"
 run qemu-img info "${vm_disk_file}"

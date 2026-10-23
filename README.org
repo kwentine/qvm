@@ -5,38 +5,56 @@ with DHCP, DNS and internet access.
 
 * Installation
 #+begin_src sh
-  sudo make install                 # NetworkManager creates the qvm0 bridge
-  sudo make install BRIDGE=script   # or: qvm-bridge.service creates it
-  sudo usermod -aG qvm "$USER"      # then log in again
+  sudo make install       # host network, as root
+  make install-helpers    # helper scripts, as yourself
 #+end_src
 
 This installs:
-| What                                      | Where                                              |
-|-------------------------------------------+----------------------------------------------------|
-| Helper scripts                            | =/opt/qvm/bin=                                     |
-| dnsmasq and nftables configuration        | =/etc/opt/qvm=                                     |
-| systemd units (linked with =systemctl=)   | =/etc/opt/qvm/systemd=                             |
-| Bridge definition (=BRIDGE=nm=)           | =/etc/NetworkManager/system-connections/qvm0.nmconnection= |
+| What                                    | Where                                                      |
+|-----------------------------------------+------------------------------------------------------------|
+| Bridge definition (NetworkManager)      | =/etc/NetworkManager/system-connections/qvm0.nmconnection= |
+| dnsmasq and nftables configuration      | =/etc/opt/qvm=                                             |
+| systemd units (linked with =systemctl=) | =/etc/opt/qvm/systemd=                                     |
+| Helper scripts (=make install-helpers=) | =~/.local/bin=                                             |
 
-To use the helpers from this checkout instead, =source env.sh=.
+VM disks, base images and cloud-init seeds are searched in =~/.local/share/qvm=
+(or =$QVM_DATA_DIR=), and configuration in =~/.config/qvm= (or =$QVM_CONFIG_DIR=).
 
 * Network
 Bring up the =qvm0= bridge (=10.42.0.1/24=).
 NAT to the internet and =dnsmasq= serving DHCP and DNS for the =qvm0.lan= domain
-start and stop with it:
+start and stop with it.
+On a host without NetworkManager, see [[file:docs/net.org::*Bridge][creating the bridge by hand]].
 #+begin_src sh
-  nmcli connection up qvm0                  # BRIDGE=nm (down to stop)
-  sudo systemctl start qvm-bridge.service   # BRIDGE=script (stop to stop)
+  nmcli connection up qvm0      # down to stop
   # Inspect
   ip addr show qvm0
   resolvectl status qvm0
   journalctl -b -u qvm-dns.service
 #+end_src
 
+** Firewall
+QVM keeps its rules in its own =inet qvm0= table ([[file:config/qvm0.nft]]), loaded by =qvm-nat.service=:
+- masquerade traffic from the VMs to the outside world;
+- drop new connections /into/ =qvm0= from any other interface: VMs can reach out, nobody can reach in.
+
+*** Input
+If your firewall drops incoming packets by default, allow DHCP and DNS from the VMs to =dnsmasq= on the host:
+#+begin_src
+  iifname "qvm0" udp dport { 53, 67 } accept
+  iifname "qvm0" tcp dport 53 accept
+#+end_src
+
+*** IP forwarding
+For the host to route the VMs' packets, =qvm-nat.service= enables IPv4 forwarding
+(=net.ipv4.ip_forward=1=) when the bridge comes up. Like [[https://docs.docker.com/engine/network/firewall-nftables/#ip-forwarding][Docker]], it never turns it off:
+other tools may rely on it.
+
 * Creating virtual machines
-- Add =qcow2= images that serve as VM templates to =/var/opt/qvm/templates=:
+- Add =qcow2= images that serve as VM templates to =~/.local/share/qvm/templates=:
 #+begin_src sh
-  cp ~/Downloads/rhel-10.0-x86_64-kvm.qcow2 /var/opt/qvm/templates
+  mkdir -p ~/.local/share/qvm/templates
+  cp ~/Downloads/rhel-10.0-x86_64-kvm.qcow2 ~/.local/share/qvm/templates
 #+end_src
 
 - Create a VM disk named =node=, as an overlay of a template:
@@ -54,7 +72,7 @@ start and stop with it:
 #+begin_src sh
   smp=2       # CPUs (default: 4)
   m=4G        # memory (default: 8G)
-  cdrom=rhel-10.0-x86_64-dvd   # ISO in /var/opt/qvm/iso
+  cdrom=rhel-10.0-x86_64-dvd   # ISO in ~/.local/share/qvm/iso
   # mac=52:54:00:12:34:56      # default: derived from the VM name
 #+end_src
 
@@ -78,7 +96,7 @@ Alternatively, SSH to the VM, assuming cloud-init authorized your key:
 
 To stop a VM started in the background:
 #+begin_src sh
-  kill "$(cat /var/opt/qvm/run/node.pid)"
+  kill "$(cat ~/.local/share/qvm/run/node.pid)"
 #+end_src
 
 * How it works

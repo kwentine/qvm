@@ -99,6 +99,7 @@ fi
 
 # Run in the background
 if ((detach)); then
+  run mkdir -p "${RUNTIME_DIR}"
   args+=(
     -daemonize
     -pidfile "${RUNTIME_DIR}/${vm}".pid

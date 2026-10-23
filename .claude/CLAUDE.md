@@ -5,113 +5,73 @@ I started the QVM project with two objectives:
 2. Practical: conveniently spin up local Kubernetes clusters that I can use for experiments and debugging
 
 Think of it as a very targeted and simple virt-manager.
+The documentation should keep its educational flavor: explain each layer, show the plain commands.
 
-## Initial design
+## Design
 
-The general design ideas are outlined below.
+### Network (host side, root)
+- The `qvm0` bridge (`10.42.0.1/24`) is a shared L2 network for the VMs.
+  It is defined in a NetworkManager keyfile, `config/qvm0.nmconnection`, not brought up at boot:
+  `nmcli connection up qvm0` / `down`.
+  The manual way (`ip`, `resolvectl`), for hosts without NetworkManager, is documented in `docs/net.org`.
+- `dnsmasq` (`config/dnsmasq.conf`) assigns IPs to VMs and registers their host names in `qvm0.lan`.
+- NAT lives in its own nftables table, `inet qvm0` (`config/qvm0.nft`).
+  `qvm-nat.service` loads it and turns on IPv4 forwarding (never off, like Docker or libvirt).
+- `qvm-dns.service` and `qvm-nat.service` follow the bridge: wanted by and bound to
+  `sys-subsystem-net-devices-qvm0.device`.
 
-### Networking:
-- A Linux bridge on the host is used as a shared L2 network for the VMS.
-- `dnsmasq` running on the host assigns host names and IPs to VMs as they appear
-- Firewall rules on the host allow traffic originating on the bridge to reach internet
-
-### Virtual machines
-- Virtual machine disks (`.qcow2`) are stored in a filesystem directory on the host
-- Virtual machine disks derive from "base" `.qcow2` official images
-- cloud-init local datasources customize VMs on first boot
-
-### Helper scripts
-A set of bash scripts act as helpers to setup the various components.
-As the current README documents, I started by invoking them by hand separately.
-Now I am moving towards integrating them with `systemd`
-
-- `qvm-bridge` sets up the VM network bridge `qvm0` with a hard-coded IP subnet
-- `qvm-create` creates VM disk images from official base images stored on disk
-- `qvm-localds` build cloud-init local datasources
-- `qvm-run` starts a VM by invoking qemu
+### Virtual machines (user side, unprivileged)
+- Helper scripts: `qvm-create` (qcow2 overlay of a base image), `qvm-localds` (cloud-init NoCloud seed),
+  `qvm-run` (starts qemu; MAC derived from the VM name).
+- Data in `QVM_DATA_DIR` (default `~/.local/share/qvm`): `templates/`, `machines/`, `localds/VM/`, `iso/`, `run/`.
+  The seed directory is attached as a VFAT disk by QEMU's `vvfat` driver: no image, no root.
+- Configuration in `QVM_CONFIG_DIR` (default `~/.config/qvm`):
+  `user-data/VM.yaml`, `machines/VM` (shell variables: `smp`, `m`, `mac`, `cdrom`), `ssh/`.
+- VMs join the bridge through the setuid `qemu-bridge-helper` (`allow qvm0` in `/etc/qemu/bridge.conf`).
 
 ### RHEL-specific considerations
 To have RHEL systems close to the machines I maintain at work, without needing to bother with system registration,
-RHEL packages are mounted as CDs in the VMs.
+RHEL packages are mounted as CDs in the VMs (see `config/user-data/rhel.example.yaml`).
 
-### Configuration
-A VM is uniquely identified by its name, for example `workbox`.
-The idea was then to store vm configurations in `~/.config/qvm`
-- Cloud init configuration in `.config/user-data/workbox.yaml`
-- Extra qemu parameters `.config/qvm/machines/workbox`
-- SSH keys to access vms in `.config/qvm/ssh`
+### Installation
+The Makefile should be idiomatic and respect established practices (no `sudo` inside recipes, `DESTDIR` support).
+- `sudo make install`: host network. Configuration in `/etc/opt/qvm`, unit files in `/etc/opt/qvm/systemd`,
+  enabled with `systemctl` (which links them into `/etc/systemd/system`).
+- `make install-helpers`: helper scripts in `~/.local/bin`.
 
-### System installation
-This is the part I was least comfortable with: install the `qvm` tool suite on my host,
-following standard filesystem conventions, and `systemd` to manage vms
+### My host
+Fedora Atomic (Sericea): `/opt` is a symlink to `/var/opt`, extra packages (qemu) are layered with `rpm-ostree`.
 
-Roughly, my thoughts were:
-| Kind                                        | Location                                     |
-| Executables                                 | /opt/qvm/bin                                 |
-| Configuration files                         | /etc/opt/qvm                                 |
-| Unit files                                  | /etc/systemd/system via /etc/opt/qvm/systemd |
+## Roadmap
+See `.claude/PLAN.org` for details.
 
+- Re-write the helpers in Python for easier maintenance, installable with `uv`;
+  TOML machine configuration (including `mac`), dropping legacy options I no longer use.
+- Manage VMs with `systemd --user`:
+  a `qvm-machine@.service` template unit, cluster targets, graceful shutdown (QMP),
+  and a readiness probe on VM startup that checks that `sshd` is up.
+  Typical workflow:
+  ```
+  nmcli connection up qvm0
+  systemctl --user start qvm-machine@workbox.service
+  systemctl --user start k8s.target      # a group of VMs
+  ssh workbox
+  ```
+- A drop-in SSH configuration: all qvm-related SSH config and keys in `~/.config/qvm/ssh`,
+  included from `~/.ssh/config`, instead of my hand-edited block:
+  ```
+  Host 10.42.0.* *.qvm0.lan *.qvm0 jmp cp wk1 wk2 r0 r1 r2
+       StrictHostKeyChecking no
+       UserKnownHostsFile /dev/null
+       IdentityFile ~/.config/qvm/ssh/id_ed25519
+       User root
+       LogLevel QUIET
+  ```
+- Polish the documentation for open source publication, and facilitate re-use.
 
-
-Typical imagined workflow:
-```
-# Enable all the networkin prerequisites
-# Create the bridge, install the firewall rules, start dnsmasq and configure DNS resolution
-# Those are privileged operations, so a system service seems to make sense
-sudo systemctl start qvm-network.service
-
-# Start a particular VM
-systemctl --user start qvm-machine-workbox.service
-
-# Start a cluster, which is a group of VMs
-systemctl --user start qvm-cluster-k8s.service
-
-# ssh into a vm conveniently
-ssh workbox
-```
-
-The installation should be performed from a Makefile.
-`make install` installs the tools and the systemd system services
-
-Then the user (myself essentially) edits configuration files,
-including unit files, in `.config/qvm/{systemd,machines,user-data}`.
-
-I thought VM disks could live in a system installation directory, `/var/opt/qvm`.
-And host configuration (firewall, resolver configuration, dnsmasq configuration) in `/etc/opt/qvm`
-I thought a good precaution would by to install `systemd` unit files there, and install them on the system using `systemctl`
-
-I want the Makefile to be idiomatic, and respect established practices.
-
-
-
-## Improvement ideas
-
-- re-write the helpers in Python for easier maintenance.
-  this can include simplifying removing legacy options that I no longer use
-  optionally, if desirable, make it available as a python package that can be `uv` installed
-
-- Polish the project documentation for proper open source publication, and facilitate re-use
-  It should keep its educational flavor
-
-- A drop-in ssh configuration mechanism would be nice. Currently, I have edited my `.ssh/config`
-```
-Host 10.42.0.* *.qvm0.lan *.qvm0 jmp cp wk1 wk2 r0 r1 r2
-     StrictHostKeyChecking no
-     UserKnownHostsFile /dev/null
-     IdentityFile ~/.config/qvm/ssh/id_ed25519
-     User root
-     LogLevel QUIET
-```
-but I would prefer all the qvm-related SSH config and keys to live in `.config/qvm/ssh`
-
-- Use a configuration-file approach for the `resolvectl` commands currently included in `qvm-dns.service`
-
-When this basic setup is in place, some features could be added:
+Later features:
 - Support multiple separate bridges
-- integrate `bootc` in the picture,
-  so that I can learn this technology and build my VM images from Dockerfiles
-- add mechanisms to mount host directories (and later even devices) in the VMs
-- have an example of how to install RKE2 on a freshly spun up cluster using pyinfra
-- support alternatives to cloud-init such as
-- automate the generation of the `qvm-machine-@.service` units
-- add a readiness probe" on VM startup that checks that `sshd` is up
+- Integrate `bootc`, to learn this technology and build my VM images from Containerfiles
+- Mount host directories (and later even devices) in the VMs
+- An example of how to install RKE2 on a freshly spun up cluster using pyinfra
+- Support alternatives to cloud-init (e.g. Ignition)

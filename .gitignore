@@ -5,3 +5,4 @@
 values.auto.pkrvars.hcl
 *.fd
 scratch
+.claude/*.org

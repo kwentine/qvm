@@ -1,7 +1,7 @@
 [Unit]
 Description=Start dnsmasq server on interface qvm0
 # udev exposes every network interface as a device unit, whoever creates it
-# (NetworkManager, qvm-bridge.service, `ip link add`...):
+# (NetworkManager, `ip link add`...):
 # start once qvm0 exists, stop when it disappears.
 BindsTo=sys-subsystem-net-devices-qvm0.device
 After=sys-subsystem-net-devices-qvm0.device

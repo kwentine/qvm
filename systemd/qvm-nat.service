@@ -14,7 +14,10 @@ ReloadPropagatedFrom=nftables.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-# IPv4 forwarding is enabled once and for all by /etc/sysctl.d/90-qvm.conf
+# Like Docker, libvirt or rootful podman: turn IPv4 forwarding on when needed,
+# never off (they may rely on it too). Back to the kernel default (off) at reboot.
+# qvm0.nft keeps unsolicited traffic out of qvm0.
+ExecStartPre=sysctl -w net.ipv4.ip_forward=1
 # qvm0.nft starts by flushing its own table: loading it again is idempotent
 ExecStart=nft -f /etc/opt/qvm/qvm0.nft
 ExecReload=nft -f /etc/opt/qvm/qvm0.nft
