@@ -1,42 +1,48 @@
 #+TITLE: QVM: networked QEMU virtual machines on a Linux host
 
-A small set of helpers to run QEMU VMs on a shared bridge,
+An apparatus to run QEMU VMs on a shared bridge,
 with DHCP, DNS and internet access.
+
+Educational in the making, may it stay reasonably simple and of be of practical use.
 
 * Installation
 #+begin_src sh
-  sudo make install       # host network, as root
-  make install-helpers    # helper scripts, as yourself
+  sudo make install       # host network configuration, requires superuser privileges
+  make install-helpers    # unprivileged helper scripts
 #+end_src
 
 This installs:
-| What                                    | Where                                                      |
-|-----------------------------------------+------------------------------------------------------------|
-| Bridge definition (NetworkManager)      | =/etc/NetworkManager/system-connections/qvm0.nmconnection= |
-| dnsmasq and nftables configuration      | =/etc/opt/qvm=                                             |
-| systemd units (linked with =systemctl=) | =/etc/opt/qvm/systemd=                                     |
-| Helper scripts (=make install-helpers=) | =~/.local/bin=                                             |
+| What                                                                  | Where                                                      |
+|-----------------------------------------------------------------------+------------------------------------------------------------|
+| Bridge, configured through =NetworkManager=                           | =/etc/NetworkManager/system-connections/qvm0.nmconnection= |
+| nftables firewall rules and DNS configuration                         | =/etc/opt/qvm=                                             |
+| systemd units (linked with =systemctl=) enabling DNS and the firewall | =/etc/opt/qvm/systemd=                                     |
+| Utilities to manage virtual machines (=make install-helpers=)         | =~/.local/bin=                                             |
 
-VM disks, base images and cloud-init seeds are searched in =~/.local/share/qvm=
-(or =$QVM_DATA_DIR=), and configuration in =~/.config/qvm= (or =$QVM_CONFIG_DIR=).
+VM disks and cloud-init datasources are searched in =~/.local/share/qvm=,
+and VM configurations in =~/.config/qvm=.
 
-* Network
-Bring up the =qvm0= bridge (=10.42.0.1/24=).
-NAT to the internet and =dnsmasq= serving DHCP and DNS for the =qvm0.lan= domain
-start and stop with it.
-On a host without NetworkManager, see [[file:docs/net.org::*Bridge][creating the bridge by hand]].
+* Networking
+Virtual machines are plugged to a shared =qvm0= bridge (=10.42.0.1/24=).
+On a host without NetworkManager, the bridge can be [[file:docs/net.org::*Bridge][created by hand]].
+
+Packets are forwarded to the internat behind NAT on the host's public interface.
+DNS and DHCP for the bridge is served by =dnsmasq=, with domain =qvm0.lan=.
+
+To bring up the network and check that it is working properly:
 #+begin_src sh
-  nmcli connection up qvm0      # down to stop
-  # Inspect
-  ip addr show qvm0
+  nmcli connection up qvm0
+  ip -br addr show qvm0
   resolvectl status qvm0
   journalctl -b -u qvm-dns.service
 #+end_src
 
+See [[file:docs/net.org]] for more details on networking.
+
 ** Firewall
-QVM keeps its rules in its own =inet qvm0= table ([[file:config/qvm0.nft]]), loaded by =qvm-nat.service=:
-- masquerade traffic from the VMs to the outside world;
-- drop new connections /into/ =qvm0= from any other interface: VMs can reach out, nobody can reach in.
+NFT rules are installed in a dedicated table =inet qvm0= ([[file:config/qvm0.nft]]), loaded by =qvm-nat.service=:
+- masquerade traffic from the VMs to the internet
+- deny inbound connections to =qvm0=
 
 *** Input
 If your firewall drops incoming packets by default, allow DHCP and DNS from the VMs to =dnsmasq= on the host:
@@ -50,7 +56,9 @@ For the host to route the VMs' packets, =qvm-nat.service= enables IPv4 forwardin
 (=net.ipv4.ip_forward=1=) when the bridge comes up. Like [[https://docs.docker.com/engine/network/firewall-nftables/#ip-forwarding][Docker]], it never turns it off:
 other tools may rely on it.
 
-* Creating virtual machines
+* Configuring virtual machines
+The workflow that I use is the following:
+
 - Add =qcow2= images that serve as VM templates to =~/.local/share/qvm/templates=:
 #+begin_src sh
   mkdir -p ~/.local/share/qvm/templates
@@ -62,7 +70,7 @@ other tools may rely on it.
   qvm-create -b rhel-10.0-x86_64-kvm -s 20G node
 #+end_src
 
-- Optionally, build a =cloud-init= seed for the VM from =~/.config/qvm/user-data/node.yaml=
+- Optionally, build a =cloud-init= datasource for the VM from the template =~/.config/qvm/user-data/node.yaml=
   (see [[file:config/user-data/rhel.example.yaml]]):
 #+begin_src sh
   qvm-localds node
@@ -72,11 +80,12 @@ other tools may rely on it.
 #+begin_src sh
   smp=2       # CPUs (default: 4)
   m=4G        # memory (default: 8G)
-  cdrom=rhel-10.0-x86_64-dvd   # ISO in ~/.local/share/qvm/iso
+  cdrom=rhel-10.0-x86_64-dvd   # ISO searched in ~/.local/share/qvm/iso
   # mac=52:54:00:12:34:56      # default: derived from the VM name
 #+end_src
 
 * Running virtual machines
+** Using the qvm-run helper
 #+begin_src sh
   qvm-run node          # foreground
   qvm-run -d node       # in the background
@@ -84,32 +93,29 @@ other tools may rely on it.
 #+end_src
 
 The VM serial console and QEMU monitor are multiplexed on a pty mentioned in the output of =qvm-run=.
-To attach a terminal to it (=C-a c= switches between console and monitor):
+To attach a terminal to it, I run:
 #+begin_src sh
   foot --pty /dev/pts/3
 #+end_src
 
-Alternatively, SSH to the VM, assuming cloud-init authorized your key:
+=C-a c= then switches between console and monitor.
+
+But usually I SSH to the VM, authorizing keys through cloud-init:
 #+begin_src sh
   ssh -i ~/.config/qvm/ssh/id_ed25519 root@node.qvm0.lan
 #+end_src
 
-To stop a VM started in the background:
+I did not strive to support graceful shutdown, so better poweroff the VM guest.
+However if push comes to shove, or otherwise in a haste, I stop the QEMU process:
 #+begin_src sh
   kill "$(cat ~/.local/share/qvm/run/node.pid)"
 #+end_src
 
-** As systemd user services
-=make install-helpers= also installs a template unit, =qvm-machine@.service=, that runs =qvm-run NAME=:
+** Using systemd user services
+As part of =make install-helpers=, a template user unit =qvm-machine@.service= is installed, invoking =qvm-run=:
 #+begin_src sh
-  systemctl --user start qvm-machine@node       # stop, status, enable (start at login)...
-  journalctl --user -u qvm-machine@node         # QEMU output, including the console pty
+  systemctl --user start qvm-machine@node
+  journalctl --user -u qvm-machine@node         # QEMU output
 #+end_src
-- Stopping the unit kills QEMU at once, like pulling the power plug:
-  shut the guest down from inside first when it matters (=ssh node poweroff=).
-- The user manager does not see your shell's environment: set =QVM_DATA_DIR= or =QVM_CONFIG_DIR=
-  in =~/.config/environment.d/qvm.conf= (takes effect at next login).
-- User services stop when you log out, unless you let them linger: =loginctl enable-linger=.
-
-* How it works
-See [[file:docs/net.org]] for the networking part.
+- As previously mentioned, stopping the unit kills QEMU so it is not a graceful shutdown.
+- Should you need to change =QVM_DATA_DIR= or =QVM_CONFIG_DIR=, use  =~/.config/environment.d/qvm.conf=.
