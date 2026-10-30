@@ -1,30 +1,33 @@
-#+TITLE: Networking explained
+#+TITLE: QVM Networking
 
-* Objective
+I record here the objectives that guided the networking design.
+
+* Objectives
 - Connect guests to a bridge =qvm0= on the host, as if plugged into the same switch.
 - Give guests internet access by routing and masquerading their packets through the host.
 - Give guests stable names: =cp.qvm0.lan= resolves from the host and from other guests.
 
-| Item         | Value                                   |
-|--------------+-----------------------------------------|
-| Bridge       | =qvm0=, host address =10.42.0.1/24=     |
-| DHCP range   | =10.42.0.10= – =10.42.0.100=            |
+| Item         | Value                                        |
+|--------------+----------------------------------------------|
+| Bridge       | =qvm0=, host address =10.42.0.1/24=          |
+| DHCP range   | =10.42.0.10= – =10.42.0.100=                 |
 | Domain       | =qvm0.lan= (guests), =qvm.lan= (virtual IPs) |
-| DNS and DHCP | =dnsmasq= listening on =qvm0=           |
+| DNS and DHCP | =dnsmasq= listening on =qvm0=                |
 
-* The pieces
-| Piece                 | Provided by                                                              | systemd unit               |
-|-----------------------+--------------------------------------------------------------------------+----------------------------|
-| Bridge + DNS routing  | [[file:../config/qvm0.nmconnection][NetworkManager keyfile]] (or by hand: =ip= + =resolvectl=, [[*Bridge][below]])          | =nmcli connection up qvm0= |
-| NAT                   | [[file:../config/qvm0.nft][nftables table]] + =ip_forward=                                            | =qvm-nat.service=          |
-| DHCP and DNS          | [[file:../config/dnsmasq.conf][dnsmasq]]                                                                  | =qvm-dns.service=          |
-| Guest ports on bridge | =qemu-bridge-helper=, allowed by =allow qvm0= in =/etc/qemu/bridge.conf= | (per VM)                   |
+* The components
+| Component                    | Provided by                               | Activation                 |
+|------------------------------+-------------------------------------------+----------------------------|
+| Bridge and DNS configuration | [[file:../config/qvm0.nmconnection][NetworkManager keyfile]]                    | =nmcli connection up qvm0= |
+| NAT                          | [[file:../config/qvm0.nft][nftables table]] + =ip_forward= on the host | =qvm-nat.service=          |
+| DHCP and DNS server          | [[file:../config/dnsmasq.conf][dnsmasq]]                                   | =qvm-dns.service=          |
+| Plugging VMs to the bridge   | =qemu-bridge-helper=                      | When a VM is created       |
 
 The bridge is the on/off switch.
 =udev= publishes every network interface as a systemd device unit,
-=sys-subsystem-net-devices-qvm0.device=.
-=qvm-dns.service= and =qvm-nat.service= are /wanted by/ it (start when =qvm0= appears)
-and /bound to/ it (stop when =qvm0= disappears):
+
+Creation of the =qvm0= interface brings =qvm-dns.service= and =qvm-nat.service= up,
+as dependencies of the dynamically created =sys-subsystem-net-devices-qvm0.device= systemd unit that appears.
+
 #+begin_src sh
   systemctl list-dependencies sys-subsystem-net-devices-qvm0.device
 #+end_src
@@ -32,58 +35,57 @@ and /bound to/ it (stop when =qvm0= disappears):
 ** Bridge
 A Linux bridge is a virtual switch.
 =make install= declares it in a NetworkManager keyfile, [[file:../config/qvm0.nmconnection]],
-annotated with the commands each setting replaces. Those commands are the manual way,
-also usable on a host without NetworkManager.
+which conveniently also handles the DNS configuration.
 
-Create the bridge:
+To create the bridge manually instead:
 #+begin_src sh
   sudo ip link add name qvm0 type bridge
   sudo ip addr add 10.42.0.1/24 dev qvm0
   sudo ip link set dev qvm0 up
 #+end_src
-Route DNS queries for the VM domains to =dnsmasq= on =qvm0=:
+
+Since =qvm-dns.service= and =qvm-nat.service= are brough up by the =qvm0= interface appearing, they will start with this method too.
+
+Then to configure DNS resolution:
 #+begin_src sh
   sudo resolvectl dns qvm0 10.42.0.1
-  sudo resolvectl domain qvm0 qvm0.lan '~qvm.lan'   # '~': routing only, not a search domain
-  sudo resolvectl default-route qvm0 no             # other queries do not go there
+  sudo resolvectl domain qvm0 qvm0.lan '~qvm.lan'
+  sudo resolvectl default-route qvm0 no
   sudo resolvectl llmnr qvm0 no
   sudo resolvectl dnssec qvm0 no
 #+end_src
-These per-link settings vanish with the interface.
-Since =qvm-dns.service= and =qvm-nat.service= follow the =qvm0= device, not NetworkManager,
-they start with this bridge too. To tear it down (address and DNS settings go with it):
+
+To tear down the bridge:
 #+begin_src sh
   sudo ip link delete qvm0
 #+end_src
 
-When a VM starts, =qemu-system-x86_64 -nic bridge,br=qvm0= runs the setuid =qemu-bridge-helper=,
+When a VM starts, =qemu-system-x86_64 -nic bridge,br=qvm0= runs the setuid =root= =qemu-bridge-helper=,
 which creates a TAP device and plugs it into the bridge.
 This is how an unprivileged user can attach VMs to a bridge created by root.
 
 ** Routing and NAT
-Guests use the host (=10.42.0.1=) as their gateway. For the host to pass their packets on:
+Guests use the host (=10.42.0.1=) as their gateway. For the host to relay their to the internet:
 - IPv4 forwarding must be enabled: =qvm-nat.service= sets =net.ipv4.ip_forward=1= when the bridge comes up,
-  and leaves it on (like Docker or libvirt: others may rely on it) until reboot.
-  It is a host-wide switch, so the =FORWARD= chain lets VMs open connections out, but nobody open connections in.
-- Packets leaving through another interface are masqueraded (source NAT to the outgoing interface address,
-  which is not known beforehand). See the =POSTROUTING= chain in [[file:../config/qvm0.nft]].
+  and leaves it on (Docker or libvirt behave similarly)
+- Packets leaving through another interface are masqueraded (source NAT to the outgoing interface).
 
 The rules live in their own =inet qvm0= table, so they can be inspected and removed independently:
 #+begin_src sh
   sudo nft list table inet qvm0
 #+end_src
-=nftables.service= flushes the /whole/ ruleset when it stops or reloads.
-=qvm-nat.service= follows it (=PartOf=, =ReloadPropagatedFrom==) to load the =qvm0= table again.
+
+I have =nftables.service= enabled on my host, which flushes the /whole/ ruleset when it stops or reloads.
+So =qvm-nat.service= follows through =PartOf= and =ReloadPropagatedFrom=, to load the =qvm0= table again.
 
 ** DHCP and DNS
 =dnsmasq= runs on the =qvm0= interface, providing DHCP and DNS.
-The VMs communicate their hostname in DHCP queries,
-and =dnsmasq= maintains the corresponding DNS entries:
-while =cp= may not always get the same IP address, =cp.qvm0.lan= always resolves accurately.
-Since =qvm-run= derives the VM MAC address from its name, the IP address is stable in practice too.
+If the VMs communicate their hostname in DHCP queries,
+=dnsmasq= conveniently create scorresponding DNS entries:
+thus, while a host =node= may not always get the same IP address, =node.qvm0.lan= accurately resolves.
 
 On the host, =systemd-resolved= sends queries for =qvm0.lan= and =qvm.lan= to =dnsmasq=, and only those.
-=qvm0.lan= is also a search domain, so =ssh cp= works.
+=qvm0.lan= is also a search domain, meaning that it will be used to complete unqulified host names, so that =ssh node= works.
 
 To view =dnsmasq= logs:
 #+begin_src sh
@@ -91,7 +93,7 @@ To view =dnsmasq= logs:
 #+end_src
 
 * Sources
-I found the following online documentation sources useful:
+While learning and experimenting, I found the following online documentation sources useful:
 
 - Arch wiki
   - [[https://wiki.archlinux.org/title/QEMU/Advanced_networking][Advanced QEMU networking]]
@@ -101,3 +103,4 @@ I found the following online documentation sources useful:
 - [[https://networkmanager.dev/docs/][NetworkManager]]
 - [[https://wiki.nftables.org/wiki-nftables/index.php/Main_Page][nftables Wiki]]
 - [[https://www.linux-kvm.org/page/Networking][KVM networking guide]]
+- =dnsmasq(8)=
