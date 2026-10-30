@@ -1,0 +1,29 @@
+[Unit]
+Description=Enable NAT for qvm0 bridge
+# Like qvm-dns.service: follow the qvm0 interface
+BindsTo=sys-subsystem-net-devices-qvm0.device
+After=sys-subsystem-net-devices-qvm0.device
+# nftables.service flushes the whole ruleset, qvm0 table included,
+# when it stops, restarts or reloads. Follow it, so the table comes back:
+# restart with it (PartOf), reload with it (ReloadPropagatedFrom), after it (After).
+# No effect where nftables.service is not used.
+After=nftables.service
+PartOf=nftables.service
+ReloadPropagatedFrom=nftables.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Like Docker, libvirt or rootful podman: turn IPv4 forwarding on when needed,
+# never off (they may rely on it too). Back to the kernel default (off) at reboot.
+# qvm0.nft keeps unsolicited traffic out of qvm0.
+ExecStartPre=sysctl -w net.ipv4.ip_forward=1
+# qvm0.nft starts by flushing its own table: loading it again is idempotent
+ExecStart=nft -f /etc/opt/qvm/qvm0.nft
+ExecReload=nft -f /etc/opt/qvm/qvm0.nft
+# destroy: like delete, but no error if the table is already gone
+ExecStop=nft destroy table inet qvm0
+
+[Install]
+# Start whenever qvm0 appears
+WantedBy=sys-subsystem-net-devices-qvm0.device

@@ -1,49 +1,42 @@
-#!/bin/bash
-#+ Build cloud-init datasource for VM
-#+ Usage: SCRIPT [-h] [-u USER_DATA] VM
+#!/usr/bin/env bash
+#+ Generate the cloud-init NoCloud datasource files for VM.
+#+
+#+ The template used is QVM_CONFIG_DIR/user-data/VM.yaml,
+#+ in which occurrences of ${QVM_HOST} are replaced by VM.
+#+
+#+ Usage: SCRIPT [-h] VM
 set -eu
 SCRIPT="$(basename "$0")"
-DIR="$(dirname "$0")"
+SCRIPT_DIR="$(dirname "$0")"
 # shellcheck source-path=SCRIPTDIR
-source "${DIR}/libqvm.sh"
+source "${SCRIPT_DIR}/libqvm.sh"
 
-QVM_DIR="${QVM_DIR:-/var/vms}"
-DATASOURCE_DIR="${QVM_DIR}/localds"
+LOCALDS_DIR="${QVM_DATA_DIR}/localds"
+USERDATA_DIR="${QVM_CONFIG_DIR}/user-data"
 
-user_data="${DIR}/user-data/cloud.yaml"
-while getopts hu: opt; do
+while getopts h opt; do
   case "${opt}" in
-    u)
-      user_data="${OPTARG}"
-      ;;
     *)
-      usage
+      usage "${opt}"
       ;;
   esac
 done
 shift $((OPTIND - 1))
 
-mnt_point="$(mktemp -d /tmp/qvm-localds-XXXX)"
-on_exit() {
-  sudo umount "${mnt_point}" || true
-}
+[[ -n "${1:-}" ]] || usage
 
-trap on_exit EXIT
+vm="${1}"
+printf -v user_data '%s/%s.yaml' "${USERDATA_DIR}" "${vm}"
+[[ -f "${user_data}" ]] || errexit "no such file: ${user_data}"
 
-create_img() {
-  truncate --size 256K "${img}"
-  mkfs.vfat -n CIDATA "${img}"
-  sudo mount -t vfat "${img}" "${mnt_point}"
-  sudo cp "${user_data}" "${mnt_point}/user-data" || return 1
-  cat <<EOF | sudo tee "${mnt_point}/meta-data" >/dev/null
-instance-id: qvm-${vm}
-hostname: ${vm}
+seed_dir="${LOCALDS_DIR}/${vm}"
+mkdir -p "${seed_dir}"
+# Substitute only QVM_HOST: other $VARIABLES (e.g. in runcmd) are for the guest
+# shellcheck disable=SC2016
+QVM_HOST="${vm}" envsubst '${QVM_HOST}' <"${user_data}" >"${seed_dir}/user-data"
+# A new instance-id makes cloud-init treat the next boot as a first boot
+cat >"${seed_dir}/meta-data" <<EOF
+instance-id: qvm-${vm}-${RANDOM}
 local-hostname: ${vm}
 EOF
-}
-
-for vm in "$@"; do
-  img="${DATASOURCE_DIR}/${vm}.img"
-  create_img || errexit "Unable to create image: ${img}"
-  info "Created datasource: ${img}"
-done
+info "Created datasource: ${seed_dir}"

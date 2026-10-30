@@ -1,0 +1,48 @@
+# NetworkManager keyfile for the qvm0 bridge.
+# Each setting is annotated with the command it replaces: see docs/net.org for the manual way.
+#
+# Install (root-owned, mode 0600 or NM ignores it), then load it:
+#   install -m 0600 qvm0.nmconnection /etc/NetworkManager/system-connections/
+#   nmcli connection reload
+# Use:
+#   nmcli connection up qvm0      # or down; no sudo needed in a desktop session
+# Inspect:
+#   nmcli connection show qvm0
+#   resolvectl status qvm0
+#
+# No uuid: NM derives a stable one from the file name.
+# Reference: man 5 nm-settings-keyfile, man 5 nm-settings-nmcli
+
+[connection]
+id=qvm0
+type=bridge
+interface-name=qvm0
+# Not at boot: `nmcli connection up qvm0` creates the bridge when needed,
+# and dnsmasq and NAT follow (see qvm-dns.service, qvm-nat.service)
+autoconnect=false
+# resolvectl llmnr qvm0 no / mdns: 0 = no
+llmnr=0
+mdns=0
+
+[bridge]
+# NM enables STP by default, which delays forwarding on new ports (VM taps)
+# by the forward delay (15s). `ip link add type bridge` defaults to off.
+stp=false
+
+[ipv4]
+method=manual
+# ip addr add 10.42.0.1/24 dev qvm0
+address1=10.42.0.1/24
+# The host is not routed through qvm0.
+never-default=true
+# resolvectl dns qvm0 10.42.0.1
+dns=10.42.0.1;
+# resolvectl domain qvm0 qvm0.lan ~qvm.lan
+# Queries for these domains go to the dnsmasq on qvm0, and nothing else does
+# (NM sets default-route=no since qvm0 has no default route).
+# - qvm0.lan: search domain too, so `ssh workbox` resolves workbox.qvm0.lan
+# - ~qvm.lan: routing-only ('~'), for virtual IPs
+dns-search=qvm0.lan;~qvm.lan;
+
+[ipv6]
+method=disabled

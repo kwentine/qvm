@@ -1,43 +1,46 @@
-#!/bin/env bash
-#+ Boot a VM from a disk image in the QVM_DIR/machines directory.
-#+ Optionally enable cloud-init, with seed disk in the QVM_DIR/localds directory.
-#+ Usage: SCRIPT [-n] [-u] [-d] [-b] [-i] VM_NAME
+#!/usr/bin/env bash
+#+ Boot a VM from a disk image in QVM_DATA_DIR/machines.
+#+
+#+ If QVM_DATA_DIR/localds/VM exists (see qvm-localds),
+#+ it is attached as cloud-init NoCloud data source.
+#+
+#+ Optional settings (smp, m, mac, cdrom) are sourced from QVM_CONFIG_DIR/machines/VM.
+#+
+#+ Usage: SCRIPT [-n] [-u] [-d] VM
 set -eu
 SCRIPT="$(basename "$0")"
 DIR="$(dirname "$0")"
+# shellcheck source-path=SCRIPTDIR
 source "${DIR}/libqvm.sh"
 
-QVM_DIR="${QVM_DIR:-/var/vms}"
-MACHINES_DIR="${QVM_DIR}/machines"
-RUNTIME_DIR="${QVM_DIR}/run"
-DATASOURCE_DIR="${QVM_DIR}/localds"
+MACHINES_DIR="${QVM_DATA_DIR}/machines"
+RUNTIME_DIR="${QVM_DATA_DIR}/run"
+LOCALDS_DIR="${QVM_DATA_DIR}/localds"
+ISO_DIR="${QVM_DATA_DIR}/iso"
 
 #+ Options:
 #+ -h  Print this message and exit.
-#+ -i  Enable cloud-init.
-cloud_init=0
 #+ -n  Dry run. Print the commands that would be executed.
 dry_run=0
 #+ -d  Daemonize the QEMU process, running it in the background.
 detach=0
 #+ -u  User mode networking
 user_net=0
-#+ -b  First boot. Display the UEFI menu for 5 seconds.
-first_boot=0
-while getopts :hnduib opt; do
+
+while getopts :hndu opt; do
   case "${opt}" in
     n)
-      dry_run=1 ;;
-    i)
-      cloud_init=1 ;;
+      dry_run=1
+      ;;
     d)
-      detach=1 ;;
+      detach=1
+      ;;
     u)
-      user_net=1 ;;
-    b)
-      first_boot=1 ;;
+      user_net=1
+      ;;
     *)
-      usage "${opt}" ;;
+      usage "${opt}"
+      ;;
   esac
 done
 shift $((OPTIND - 1))
@@ -48,68 +51,63 @@ vm="${1:-}"
 drive="${MACHINES_DIR}/${vm}.qcow2"
 [[ -f "${drive}" ]] || errexit "Disk file not found: ${drive}"
 
+config_file="${QVM_CONFIG_DIR}/machines/${vm}"
+if [[ -f "${config_file}" ]]; then
+  # shellcheck disable=SC1090
+  source "${config_file}"
+fi
+
 args=(
   -name "${vm}"
   -accel kvm
   -cpu host
-  -smp 4
-  -m 8G
+  -smp "${smp:-4}"
+  -m "${m:-8G}"
   -drive "file=${drive},format=qcow2,if=virtio"
-  -drive "if=pflash,format=raw,readonly=on,file=/usr/share/edk2/ovmf/OVMF_CODE.fd"
-  # TODO: Make this more flexible
-  -cdrom "${QVM_DIR}/iso/rhel-10.0-x86_64-dvd.iso"
+  -serial mon:pty
+  -display none
 )
 
-# On first boot, give ourselves time to select boot device
-if ((first_boot)); then
-  args+=(-boot "menu=on,splash-time=5000")
-fi
-
-if ((cloud_init)); then
-  seed="${DATASOURCE_DIR}/${vm}.img"
-  [[ -e "${seed}" ]] || errexit "Invalid datasource: ${seed}"
-  args+=(-drive "file=${seed},if=virtio,format=raw")
-fi
-
-# Retrieve this VM's MAC address from static configuration,
-# generating a new one if missing.
-macaddr() {
-  local key="${1:-}"
-  local conf="${QVM_DIR}/etc/macs"
-  while read -r name macaddr; do
-    # When hitting break, macaddr holds the sought address
-    [[ "${name}" == "${key}" ]] && break
-    macaddr=""
-  done <"${conf}"
-  if [[ -z "${macaddr:-}" ]]; then
-    printf -v macaddr "52:54:%02x:%02x:%02x:%02x" \
-           $(( RANDOM & 0xff)) $(( RANDOM & 0xff)) \
-           $(( RANDOM & 0xff)) $(( RANDOM & 0xff))
-    echo "${key}" "${macaddr}" >> "${conf}"
+if [[ -n "${cdrom:-}" ]]; then
+  if [[ -f "${cdrom}" ]]; then
+    cdrom_file="${cdrom}"
+  else
+    printf -v cdrom_file '%s/%s.iso' "${ISO_DIR}" "${cdrom}"
   fi
-  echo "${macaddr}"
-}
+  [[ -f "${cdrom_file}" ]] || errexit "no such file: ${cdrom_file}"
+  args+=(
+    -cdrom "${cdrom_file}"
+  )
+fi
+
+# Add cloud-init local data source.
+# QEMU's vvfat driver presents the directory to the VM as a VFAT disk
+localds="${LOCALDS_DIR}/${vm}"
+if [[ -d "${localds}" ]]; then
+  args+=(-drive "if=virtio,format=raw,read-only=on,file.driver=vvfat,file.dir=${localds},file.label=CIDATA")
+fi
 
 if ((user_net)); then
-  printf -v port "22%02d" $((RANDOM * 100 / 32767 ))
+  printf -v port "22%02d" $((RANDOM * 100 / 32767))
   info "SSH host port: ${port}"
   args+=(-nic "user,model=virtio,hostfwd=tcp::${port}-:22")
 else
-  args+=(-nic "bridge,br=qvm0,model=virtio,mac=$(macaddr "${vm}")")
+  ((dry_run)) || [[ -e /sys/class/net/qvm0 ]] ||
+    errexit "Bridge qvm0 is down: nmcli connection up qvm0"
+  if [[ -z "${mac:-}" ]]; then
+    # Stable MAC derived from the VM name: same name, same DHCP lease, same IP.
+    # 52:54:00 is the prefix QEMU uses for its own default MACs.
+    hash="$(printf '%s' "${vm}" | sha256sum)"
+    mac="52:54:00:${hash:0:2}:${hash:2:2}:${hash:4:2}"
+  fi
+  args+=(-nic "bridge,br=qvm0,model=virtio,mac=${mac}")
 fi
 
-# Headless mode (-d option), as opposed to graphical QEMU display
-# A more succinct choice of option could have been:
-#   -display none -serial mon:pty
-# Here however, a fancy VirtIO serial port is enabled
+# Run in the background
 if ((detach)); then
+  run mkdir -p "${RUNTIME_DIR}"
   args+=(
     -daemonize
-    -display none
-    -device virtio-serial-pci
-    -chardev "pty,mux=on,id=char0"
-    -mon "chardev=char0,mode=readline"
-    -device "virtconsole,chardev=char0"
     -pidfile "${RUNTIME_DIR}/${vm}".pid
   )
 fi

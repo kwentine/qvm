@@ -1,0 +1,40 @@
+#cloud-config
+# Example user-data for a RHEL VM, with packages served from the installation DVD
+# (attached with `cdrom=` in the machine config), so no registration is needed.
+#
+# Copy to ~/.config/qvm/user-data/VM.yaml and adapt.
+# qvm-localds replaces ${QVM_HOST} with the VM name.
+disable_root: false
+ssh_pwauth: false
+users:
+  - default
+  - name: root
+    ssh_authorized_keys:
+      # Public key of ~/.config/qvm/ssh/id_ed25519
+      - "ssh-ed25519 AAAA... you@host"
+mounts:
+  - [/dev/cdrom, /mnt/dvd, "iso9660", "ro,defaults,nofail", "0", "0"]
+write_files:
+  # Silence subscription-manager: repositories come from the DVD
+  - path: /etc/dnf/plugins/subscription-manager.conf
+    permissions: "0644"
+    content: |
+      [main]
+      enabled=0
+  - path: /etc/rhsm/rhsm.conf
+    permissions: "0644"
+    append: true
+    content: |
+      [rhsm]
+      manage_repos = 0
+yum_repos:
+  BaseOS:
+    name: RHEL DVD BaseOS
+    baseurl: file:///mnt/dvd/BaseOS
+    enabled: true
+    gpgkey: file:///mnt/dvd/RPM-GPG-KEY-redhat-release
+  AppStream:
+    name: RHEL DVD AppStream
+    baseurl: file:///mnt/dvd/AppStream
+    enabled: true
+    gpgkey: file:///mnt/dvd/RPM-GPG-KEY-redhat-release
