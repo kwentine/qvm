@@ -76,12 +76,19 @@ The workflow that I use is the following:
   qvm-localds node
 #+end_src
 
-- Optionally, set VM parameters in =~/.config/qvm/machines/node=:
-#+begin_src sh
-  smp=2       # CPUs (default: 4)
-  m=4G        # memory (default: 8G)
-  cdrom=rhel-10.0-x86_64-dvd   # ISO searched in ~/.local/share/qvm/iso
-  # mac=52:54:00:12:34:56      # default: derived from the VM name
+- Optionally, set VM parameters in =~/.config/qvm/machines/node.toml=
+  (see [[file:config/machine.example.toml]]).
+  =[qvm]= holds shorthands that =qvm-run= expands, also available as command line options;
+  =[qemu]= holds QEMU options passed as they are (=key = "value"= gives =-key value=),
+  which win over =[qvm]=:
+#+begin_src toml
+  [qvm]
+  cpus = 2                         # default: 4
+  memory = "4G"                    # default: 8G
+  cdrom = "rhel-10.0-x86_64-dvd"   # ISO searched in ~/.local/share/qvm/iso
+
+  [qemu]
+  display = "gtk"                  # instead of none
 #+end_src
 
 * Running virtual machines
@@ -90,6 +97,9 @@ The workflow that I use is the following:
   qvm-run node          # foreground
   qvm-run -d node       # in the background
   qvm-run -n node       # dry run: print the qemu command line
+  qvm-run --help        # all options
+  qvm-run --cpus 2 --memory 4G node          # override the configuration file
+  qvm-run --disk ~/Downloads/fedora.qcow2    # any disk; the VM is named after it
 #+end_src
 
 The VM serial console and QEMU monitor are multiplexed on a pty mentioned in the output of =qvm-run=.
@@ -108,7 +118,7 @@ But usually I SSH to the VM, authorizing keys through cloud-init:
 I did not strive to support graceful shutdown, so better poweroff the VM guest.
 However if push comes to shove, or otherwise in a haste, I stop the QEMU process:
 #+begin_src sh
-  kill "$(cat ~/.local/share/qvm/run/node.pid)"
+  kill "$(cat "$XDG_RUNTIME_DIR"/qvm/node.pid)"   # qvm-run -d
 #+end_src
 
 ** Using systemd user services

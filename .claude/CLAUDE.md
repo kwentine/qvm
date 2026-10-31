@@ -23,10 +23,16 @@ The documentation should keep its educational flavor: explain each layer, show t
 ### Virtual machines (user side, unprivileged)
 - Helper scripts: `qvm-create` (qcow2 overlay of a base image), `qvm-localds` (cloud-init NoCloud seed),
   `qvm-run` (starts qemu; MAC derived from the VM name).
-- Data in `QVM_DATA_DIR` (default `~/.local/share/qvm`): `templates/`, `machines/`, `localds/VM/`, `iso/`, `run/`.
+  `qvm-run` is a single-file Python script (stdlib only, Python >= 3.11 for `tomllib`, lint: `ruff`);
+  the others are still bash, sharing `libqvm.sh`.
+- Data in `QVM_DATA_DIR` (default `~/.local/share/qvm`): `templates/`, `machines/`, `localds/VM/`, `iso/`.
+  Pid files (`qvm-run -d`) in `QVM_RUNTIME_DIR` (default `$XDG_RUNTIME_DIR/qvm`).
   The seed directory is attached as a VFAT disk by QEMU's `vvfat` driver: no image, no root.
 - Configuration in `QVM_CONFIG_DIR` (default `~/.config/qvm`):
-  `user-data/VM.yaml`, `machines/VM` (shell variables: `smp`, `m`, `mac`, `cdrom`), `ssh/`.
+  `user-data/VM.yaml`, `machines/VM.toml` (see `config/machine.example.toml`), `ssh/`.
+  `[qvm]` (schema: the `Machine` dataclass in `qvm-run`, which also generates the command line options)
+  and `[qemu]` (QEMU options passed as they are; a list repeats an option, `true` is a flag;
+  it wins over `[qvm]` and the command line).
 - VMs join the bridge through the setuid `qemu-bridge-helper` (`allow qvm0` in `/etc/qemu/bridge.conf`).
 
 ### RHEL-specific considerations

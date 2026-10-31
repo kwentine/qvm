@@ -1,115 +1,305 @@
-#!/usr/bin/env bash
-#+ Boot a VM from a disk image in QVM_DATA_DIR/machines.
-#+
-#+ If QVM_DATA_DIR/localds/VM exists (see qvm-localds),
-#+ it is attached as cloud-init NoCloud data source.
-#+
-#+ Optional settings (smp, m, mac, cdrom) are sourced from QVM_CONFIG_DIR/machines/VM.
-#+
-#+ Usage: SCRIPT [-n] [-u] [-d] VM
-set -eu
-SCRIPT="$(basename "$0")"
-DIR="$(dirname "$0")"
-# shellcheck source-path=SCRIPTDIR
-source "${DIR}/libqvm.sh"
+#!/usr/bin/env python3
+"""Boot a VM from a disk image in QVM_DATA_DIR/machines.
 
-MACHINES_DIR="${QVM_DATA_DIR}/machines"
-RUNTIME_DIR="${QVM_DATA_DIR}/run"
-LOCALDS_DIR="${QVM_DATA_DIR}/localds"
-ISO_DIR="${QVM_DATA_DIR}/iso"
+If directory QVM_DATA_DIR/localds/VM exists (see qvm-localds),
+it is attached as cloud-init NoCloud data source.
 
-#+ Options:
-#+ -h  Print this message and exit.
-#+ -n  Dry run. Print the commands that would be executed.
-dry_run=0
-#+ -d  Daemonize the QEMU process, running it in the background.
-detach=0
-#+ -u  User mode networking
-user_net=0
+Optional settings are read from QVM_CONFIG_DIR/machines/VM.toml:
+See config/machine.example.toml in the source repo
+"""
 
-while getopts :hndu opt; do
-  case "${opt}" in
-    n)
-      dry_run=1
-      ;;
-    d)
-      detach=1
-      ;;
-    u)
-      user_net=1
-      ;;
-    *)
-      usage "${opt}"
-      ;;
-  esac
-done
-shift $((OPTIND - 1))
+import argparse
+import hashlib
+import os
+import random
+import shlex
+import sys
+import tomllib
+from dataclasses import MISSING, dataclass, field, fields, replace
+from pathlib import Path
 
-vm="${1:-}"
-[[ -n "${vm}" ]] || errexit "Required argument: VM_NAME"
 
-drive="${MACHINES_DIR}/${vm}.qcow2"
-[[ -f "${drive}" ]] || errexit "Disk file not found: ${drive}"
+def qvm_dir(var, xdg_var, xdg_default):
+    """$VAR, or qvm in the XDG base directory."""
+    if value := os.environ.get(var):
+        return Path(value)
+    return Path(os.environ.get(xdg_var) or xdg_default) / "qvm"
 
-config_file="${QVM_CONFIG_DIR}/machines/${vm}"
-if [[ -f "${config_file}" ]]; then
-  # shellcheck disable=SC1090
-  source "${config_file}"
-fi
 
-args=(
-  -name "${vm}"
-  -accel kvm
-  -cpu host
-  -smp "${smp:-4}"
-  -m "${m:-8G}"
-  -drive "file=${drive},format=qcow2,if=virtio"
-  -serial mon:pty
-  -display none
-)
+DATA_DIR = qvm_dir("QVM_DATA_DIR", "XDG_DATA_HOME", Path.home() / ".local/share")
+CONFIG_DIR = qvm_dir("QVM_CONFIG_DIR", "XDG_CONFIG_HOME", Path.home() / ".config")
+# Pid files: on a tmpfs, emptied at logout and reboot
+RUNTIME_DIR = qvm_dir("QVM_RUNTIME_DIR", "XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+MACHINES_DIR = DATA_DIR / "machines"
+LOCALDS_DIR = DATA_DIR / "localds"
+ISO_DIR = DATA_DIR / "iso"
+BRIDGE = "qvm0"
 
-if [[ -n "${cdrom:-}" ]]; then
-  if [[ -f "${cdrom}" ]]; then
-    cdrom_file="${cdrom}"
-  else
-    printf -v cdrom_file '%s/%s.iso' "${ISO_DIR}" "${cdrom}"
-  fi
-  [[ -f "${cdrom_file}" ]] || errexit "no such file: ${cdrom_file}"
-  args+=(
-    -cdrom "${cdrom_file}"
-  )
-fi
 
-# Add cloud-init local data source.
-# QEMU's vvfat driver presents the directory to the VM as a VFAT disk
-localds="${LOCALDS_DIR}/${vm}"
-if [[ -d "${localds}" ]]; then
-  args+=(-drive "if=virtio,format=raw,read-only=on,file.driver=vvfat,file.dir=${localds},file.label=CIDATA")
-fi
+@dataclass
+class Machine:
+    """The [qvm] table of the configuration file: its schema and defaults.
+    Each key is also a command line option, which takes precedence."""
 
-if ((user_net)); then
-  printf -v port "22%02d" $((RANDOM * 100 / 32767))
-  info "SSH host port: ${port}"
-  args+=(-nic "user,model=virtio,hostfwd=tcp::${port}-:22")
-else
-  ((dry_run)) || [[ -e /sys/class/net/qvm0 ]] ||
-    errexit "Bridge qvm0 is down: nmcli connection up qvm0"
-  if [[ -z "${mac:-}" ]]; then
-    # Stable MAC derived from the VM name: same name, same DHCP lease, same IP.
-    # 52:54:00 is the prefix QEMU uses for its own default MACs.
-    hash="$(printf '%s' "${vm}" | sha256sum)"
-    mac="52:54:00:${hash:0:2}:${hash:2:2}:${hash:4:2}"
-  fi
-  args+=(-nic "bridge,br=qvm0,model=virtio,mac=${mac}")
-fi
+    cpus: int = field(default=4, metadata={"help": "number of CPUs"})
+    memory: str = field(default="8G", metadata={"help": "RAM size"})
+    cdrom: str = field(default="", metadata={"help": "ISO: a path, or a name in QVM_DATA_DIR/iso"})
+    mac: str = field(default="", metadata={"help": "MAC address (default: derived from VM)"})
+    disks: list[str] = field(
+        default_factory=list,
+        metadata={"help": "extra disks: paths, not *.qcow2 means raw"},
+    )
 
-# Run in the background
-if ((detach)); then
-  run mkdir -p "${RUNTIME_DIR}"
-  args+=(
-    -daemonize
-    -pidfile "${RUNTIME_DIR}/${vm}".pid
-  )
-fi
 
-run qemu-system-x86_64 "${args[@]}"
+# Description, parser of the command line value, check of the TOML value
+TYPES = {
+    int: ("an integer", int, lambda v: type(v) is int),
+    str: ("a string", str, lambda v: isinstance(v, str)),
+    list[str]: (
+        "a list of strings",
+        lambda s: [item for item in s.split(",") if item],  # --disks= : none
+        lambda v: isinstance(v, list) and all(isinstance(i, str) for i in v),
+    ),
+}
+
+# Default QEMU
+# Override using the [qemu] section in the configuration file.
+QEMU_DEFAULTS = {
+    "accel": "kvm",
+    "cpu": "host",
+    "serial": "mon:pty",
+    "display": "none",
+}
+# QEMU options derived from [qvm]: a [qemu] entry with the same key wins
+SHORTHANDS = {"smp": "cpus", "m": "memory", "cdrom": "cdrom"}
+
+
+class Error(Exception):
+    """Printed as ERROR: message, exit status 1."""
+
+
+def info(message):
+    print(f"INFO: {message}", file=sys.stderr)
+
+
+def load_config(path):
+    """The [qvm] and [qemu] tables of a configuration file, checked."""
+    try:
+        with path.open("rb") as f:
+            config = tomllib.load(f)
+    except OSError as e:
+        raise Error(f"{path}: {e.strerror}") from e
+    except tomllib.TOMLDecodeError as e:
+        raise Error(f"{path}: {e}") from e
+
+    if unknown := config.keys() - {"qvm", "qemu"}:
+        raise Error(f"{path}: unknown {', '.join(sorted(unknown))}, expected [qvm] and [qemu]")
+    qvm, qemu = config.get("qvm", {}), config.get("qemu", {})
+    schema = {f.name: f.type for f in fields(Machine)}
+    for key, value in qvm.items():
+        if key not in schema:
+            raise Error(f"{path}: unknown [qvm] {key}, expected one of: {', '.join(schema)}")
+        description, _, valid = TYPES[schema[key]]
+        if not valid(value):
+            raise Error(f"{path}: [qvm] {key} must be {description}")
+    for key, value in qemu.items():
+        try:
+            qemu_option(key, value)
+        except Error as e:
+            raise Error(f"{path}: {e}") from e
+    return qvm, qemu
+
+
+def qemu_option(key, value):
+    """Command line arguments for a [qemu] entry.
+    TOML keys are unique: a list is how an option appears several times.
+      key = "value"         -key value
+      key = ["v1", "v2"]    -key v1 -key v2
+      key = true            -key               (a flag)
+      key = false           nothing            (drops what qvm-run would pass)
+    """
+    if value is True:
+        return [f"-{key}"]
+    if value is False:
+        return []
+    if isinstance(value, str):
+        return [f"-{key}", value]
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return [arg for item in value for arg in (f"-{key}", item)]
+    raise Error(
+        f'[qemu] {key}: expected a string, a list of strings, true or false: {key} = "{value}"'
+    )
+
+
+def find_iso(name):
+    """A path, or a name in QVM_DATA_DIR/iso."""
+    path = Path(name).expanduser()
+    if path.is_file():
+        return path.absolute()
+    if (found := ISO_DIR / f"{name}.iso").is_file():
+        return found
+    raise Error(f"no such file: {name} (nor {found})")
+
+
+def drive(path):
+    """-drive for a virtio disk. Not qcow2 means raw: QEMU guessing the format of
+    a raw image would let the guest turn it into a qcow2 pointing to host files."""
+    disk_format = "qcow2" if path.suffix == ".qcow2" else "raw"
+    return ["-drive", f"file={path},format={disk_format},if=virtio"]
+
+
+def stable_mac(vm):
+    """Same name, same MAC, same DHCP lease, same IP.
+    52:54:00 is the prefix QEMU uses for its own default MACs."""
+    digest = hashlib.sha256(vm.encode()).hexdigest()
+    return f"52:54:00:{digest[0:2]}:{digest[2:4]}:{digest[4:6]}"
+
+
+def qemu_args(opts):
+    """The qemu-system-x86_64 arguments that boot the VM."""
+    vm = opts.vm
+    disk = Path(opts.disk or MACHINES_DIR / f"{vm}.qcow2")
+    if not disk.is_file():
+        raise Error(f"Disk file not found: {disk}")
+
+    config = Path(opts.config or CONFIG_DIR / "machines" / f"{vm}.toml")
+    qvm, qemu = load_config(config) if opts.config or config.exists() else ({}, {})
+    # Precedence: command line, then [qvm], then defaults. [qemu] wins over all of them (below).
+    command_line = {f.name: getattr(opts, f.name) for f in fields(Machine)}
+    command_line = {key: value for key, value in command_line.items() if value is not None}
+    machine = replace(Machine(**qvm), **command_line)
+    for key, shorthand in SHORTHANDS.items():
+        if key in qemu and shorthand in qvm.keys() | command_line.keys():
+            info(f"[qemu] {key} overrides {shorthand}")
+
+    # Options a [qemu] entry with the same key replaces
+    options = {"name": vm, "smp": str(machine.cpus), "m": machine.memory} | QEMU_DEFAULTS
+    if machine.cdrom and "cdrom" not in qemu:
+        options["cdrom"] = str(find_iso(machine.cdrom))
+    args = []
+    for key, value in options.items():
+        args += qemu_option(key, qemu.get(key, value))
+
+    # First virtio disk: the VM boots from /dev/vda, extra disks are vdb, vdc...
+    args += drive(disk.absolute())
+    for name in machine.disks:
+        path = Path(name).expanduser()
+        if not path.is_file():
+            raise Error(f"Disk file not found: {path}")
+        args += drive(path.absolute())
+
+    # Add cloud-init local data source.
+    # QEMU's vvfat driver presents the directory to the VM as a VFAT disk
+    # Explicit with --disk: no seed unless --cloud-init
+    if opts.cloud_init:
+        localds = Path(opts.cloud_init)
+        if not localds.is_dir():
+            raise Error(f"Not a directory: {localds}")
+    else:
+        localds = None if opts.disk else LOCALDS_DIR / vm
+    if localds and localds.is_dir():
+        vvfat = f"file.driver=vvfat,file.dir={localds.absolute()},file.label=CIDATA"
+        args += ["-drive", f"if=virtio,format=raw,read-only=on,{vvfat}"]
+
+    if opts.user_net:
+        port = random.randrange(2200, 2300)
+        info(f"SSH host port: {port}")
+        args += ["-nic", f"user,model=virtio,hostfwd=tcp::{port}-:22"]
+    else:
+        if not (opts.dry_run or Path("/sys/class/net", BRIDGE).exists()):
+            raise Error(f"Bridge {BRIDGE} is down: nmcli connection up {BRIDGE}")
+        mac = machine.mac or stable_mac(vm)
+        args += ["-nic", f"bridge,br={BRIDGE},model=virtio,mac={mac}"]
+
+    if opts.daemonize:
+        args += ["-daemonize", "-pidfile", str(RUNTIME_DIR / f"{vm}.pid")]
+
+    # Other [qemu] options, after the disks so as not to take /dev/vda
+    for key, value in qemu.items():
+        if key not in options:
+            args += qemu_option(key, value)
+    return args
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "-n", "--dry-run", action="store_true", help="print the commands that would be executed"
+    )
+    parser.add_argument(
+        "-d",
+        "--daemonize",
+        action="store_true",
+        help="run QEMU in the background (pid file in QVM_RUNTIME_DIR)",
+    )
+    parser.add_argument(
+        "-u",
+        "--user-net",
+        action="store_true",
+        help="user mode networking instead of the bridge: SSH is forwarded from a host port",
+    )
+    parser.add_argument(
+        "vm", metavar="VM", nargs="?", help="VM name (default: the --disk file name)"
+    )
+
+    paths = parser.add_argument_group("paths", "Given, the default location is not searched.")
+    paths.add_argument(
+        "--disk", metavar="PATH", help="boot disk path (default: QVM_DATA_DIR/machines/VM.qcow2)"
+    )
+    paths.add_argument(
+        "--config",
+        metavar="PATH",
+        help="configuration file (default: QVM_CONFIG_DIR/machines/VM.toml)",
+    )
+    paths.add_argument(
+        "--cloud-init",
+        metavar="DIR",
+        help="NoCloud seed directory (default: QVM_DATA_DIR/localds/VM, none with --disk)",
+    )
+
+    # Generated from the Machine schema
+    machine = parser.add_argument_group(
+        "machine",
+        "The [qvm] table of the configuration file, overridden from the command line."
+        " A [qemu] entry for the same QEMU option wins over both.",
+    )
+    for f in fields(Machine):
+        _, parse, _ = TYPES[f.type]
+        metavar = "A,B..." if f.type == list[str] else f.name.upper()
+        text = f.metadata["help"]
+        if f.default not in ("", MISSING):
+            text += f" (default: {f.default})"
+        machine.add_argument(f"--{f.name}", type=parse, metavar=metavar, help=text)
+
+    opts = parser.parse_args()
+    if not opts.vm:
+        if not opts.disk:
+            parser.error("VM is required, unless --disk is given")
+        opts.vm = Path(opts.disk).stem
+    return opts
+
+
+def main():
+    opts = parse_args()
+    try:
+        command = ["qemu-system-x86_64", *qemu_args(opts)]
+    except Error as e:
+        sys.exit(f"ERROR: {e}")
+    if opts.dry_run:
+        if opts.daemonize:
+            print(shlex.join(["mkdir", "-p", str(RUNTIME_DIR)]))
+        print(shlex.join(command))
+        return
+    if opts.daemonize:
+        RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    # QEMU replaces this process: same PID, so systemd watches QEMU itself
+    try:
+        os.execvp(command[0], command)
+    except FileNotFoundError:
+        sys.exit(f"ERROR: {command[0]} not found: is QEMU installed?")
+
+
+if __name__ == "__main__":
+    main()

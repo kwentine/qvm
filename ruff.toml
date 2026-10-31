@@ -1,0 +1,7 @@
+# Python helpers in scripts/ (no .py extension: listed explicitly)
+target-version = "py311"  # tomllib
+line-length = 100
+extend-include = ["scripts/qvm-run"]
+
+[lint]
+extend-select = ["B", "I", "SIM", "UP"]
